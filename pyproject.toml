@@ -9,6 +9,7 @@ description = "Pure vision-driven Terraria AI agent"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",
+    "pyautogui>=0.9",
 ]
 
 [project.optional-dependencies]
