@@ -16,7 +16,7 @@ class EnemyThreat(str, Enum):
 class TerrainType(str, Enum):
     FLAT = "flat"
     PIT = "pit"
-    WALL = "wall"
+    BLOCK_WALL = "block_wall"
     PLATFORM = "platform"
     WATER = "water"
     LAVA = "lava"
