@@ -1,0 +1,37 @@
+{
+    "gameplay": {
+        "use_item": "mouse1",
+        "interact": "mouse2",
+        "up": "w",
+        "down": "s",
+        "left": "a",
+        "right": "d",
+        "jump": "space",
+        "grapple": "q",
+        "auto_select": "leftshift",
+        "smart_cursor": "leftctrl",
+        "quick_mount": "r",
+        "quick_heal": "f",
+        "quick_mana": "mouse5",
+        "quick_buff": "b",
+        "throw": "t",
+        "inventory": "oem_tilde",
+        "dash": "g"
+    },
+    "hotbar": {
+        "1": "1",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "z",
+        "8": "x",
+        "9": "c",
+        "10": "v"
+    },
+    "map": {
+        "toggle_full_map": "m",
+        "toggle_map_style": "tab"
+    }
+}
