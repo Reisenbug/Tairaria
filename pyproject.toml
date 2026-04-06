@@ -13,6 +13,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+vision = [
+    "mss>=9.0",
+    "numpy>=1.26",
+    "opencv-python>=4.8",
+    "Pillow>=10.0",
+    "pyobjc-framework-Quartz>=10.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov",
