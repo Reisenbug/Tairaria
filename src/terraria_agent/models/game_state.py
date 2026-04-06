@@ -32,6 +32,12 @@ class Player(BaseModel):
     direction: str = "right"
     buffs: list[str] = []
     debuffs: list[str] = []
+    took_damage: bool = False
+    damage_amount: int = 0
+    danger_level: str = "safe"
+    hp_trend: str = "stable"
+    selected_slot: int = 0
+    inventory_open: bool = False
 
 
 class Enemy(BaseModel):
