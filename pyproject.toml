@@ -20,10 +20,18 @@ vision = [
     "Pillow>=10.0",
     "pyobjc-framework-Quartz>=10.0",
 ]
+hud = [
+    "dearpygui>=2.0",
+    "pynput>=1.7",
+    "pyobjc-framework-Cocoa>=10.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov",
 ]
+
+[project.scripts]
+terraria-agent = "terraria_agent.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
