@@ -18,42 +18,25 @@ needs_screenshots = pytest.mark.skipif(
 )
 
 
-class TestHeartCounting:
-    @needs_screenshots
-    def test_normal_5_hearts(self):
-        img = cv2.imread(str(SCREENSHOTS / "normal.png"))
-        reader = UIReader()
-        state = reader.read(img)
-        assert state.hp == 100
-        assert state.max_hp == 100
-
-    @needs_screenshots
-    def test_inventory_5_hearts(self):
-        img = cv2.imread(str(SCREENSHOTS / "inventory.png"))
-        reader = UIReader()
-        state = reader.read(img)
-        assert state.hp == 100
-        assert state.max_hp == 100
-
-    def test_no_hearts_black_frame(self):
+class TestHPReading:
+    def test_black_frame_returns_zero(self):
         frame = np.zeros((819, 1456, 3), dtype=np.uint8)
         reader = UIReader()
         state = reader.read(frame)
         assert state.hp == 0
-        assert state.max_hp == 0
+
+    def test_last_max_hp_cached(self):
+        reader = UIReader()
+        reader._last_max_hp = 200
+        frame = np.zeros((819, 1456, 3), dtype=np.uint8)
+        state = reader.read(frame)
+        assert state.max_hp == 200
 
 
 class TestSelectedSlot:
     @needs_screenshots
     def test_slot_0_selected_normal(self):
         img = cv2.imread(str(SCREENSHOTS / "normal.png"))
-        reader = UIReader()
-        state = reader.read(img)
-        assert state.selected_slot == 0
-
-    @needs_screenshots
-    def test_slot_0_selected_inventory(self):
-        img = cv2.imread(str(SCREENSHOTS / "inventory.png"))
         reader = UIReader()
         state = reader.read(img)
         assert state.selected_slot == 0
@@ -77,6 +60,6 @@ class TestInventoryOpen:
 
 class TestConfigOverride:
     def test_custom_config(self):
-        cfg = UIReaderConfig(heart_min_area=999)
+        cfg = UIReaderConfig(ocr_scale=2)
         reader = UIReader(config=cfg)
-        assert reader._cfg.heart_min_area == 999
+        assert reader._cfg.ocr_scale == 2

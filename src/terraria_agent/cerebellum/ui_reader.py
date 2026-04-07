@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
-
-
-HP_PER_HEART = 20
+import pytesseract
 
 
 @dataclass
@@ -20,21 +19,22 @@ class UIState:
 
 @dataclass
 class UIReaderConfig:
-    hearts_region: tuple[float, float, float, float] = (0.70, 0.0, 0.30, 0.07)
+    life_text_region: tuple[float, float, float, float] = (0.82, 0.0, 0.14, 0.03)
     hotbar_region: tuple[float, float, float, float] = (0.032, 0.017, 0.261, 0.046)
     buff_region: tuple[float, float, float, float] = (0.01, 0.066, 0.20, 0.032)
     inventory_region: tuple[float, float, float, float] = (0.03, 0.08, 0.25, 0.15)
-    heart_red_lower_1: list[int] = field(default_factory=lambda: [0, 120, 100])
-    heart_red_upper_1: list[int] = field(default_factory=lambda: [8, 255, 255])
-    heart_red_lower_2: list[int] = field(default_factory=lambda: [172, 120, 100])
-    heart_red_upper_2: list[int] = field(default_factory=lambda: [180, 255, 255])
-    heart_min_area: int = 30
     hotbar_yellow_lower: list[int] = field(default_factory=lambda: [20, 180, 180])
     hotbar_yellow_upper: list[int] = field(default_factory=lambda: [35, 255, 255])
     inventory_bg_lower: list[int] = field(default_factory=lambda: [105, 100, 100])
     inventory_bg_upper: list[int] = field(default_factory=lambda: [125, 180, 180])
     buff_std_threshold: float = 25.0
     inventory_ratio_threshold: float = 0.3
+    ocr_scale: int = 4
+    ocr_thresholds: list[int] = field(default_factory=lambda: [140, 150, 160])
+
+
+_HP_RE = re.compile(r"(\d+)\s*/\s*(\d+)")
+_TESS_CFG = "--psm 7 -c tessedit_char_whitelist=0123456789/"
 
 
 class UIReader:
@@ -42,10 +42,11 @@ class UIReader:
 
     def __init__(self, config: UIReaderConfig | None = None) -> None:
         self._cfg = config or UIReaderConfig()
+        self._last_max_hp: int = 100
 
     def read(self, frame: np.ndarray) -> UIState:
         h, w = frame.shape[:2]
-        hp, max_hp = self._read_hp_hearts(frame, w, h)
+        hp, max_hp = self._read_hp_ocr(frame, w, h)
         selected_slot = self._read_selected_slot(frame, w, h)
         buff_active = self._read_buff_active(frame, w, h)
         inventory_open = self._read_inventory_open(frame, w, h)
@@ -63,23 +64,39 @@ class UIReader:
         x2, y2 = int((rx + rw) * w), int((ry + rh) * h)
         return frame[y1:y2, x1:x2]
 
-    def _read_hp_hearts(self, frame: np.ndarray, w: int, h: int) -> tuple[int, int]:
-        roi = self._crop(frame, self._cfg.hearts_region, w, h)
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        red1 = cv2.inRange(hsv, np.array(self._cfg.heart_red_lower_1), np.array(self._cfg.heart_red_upper_1))
-        red2 = cv2.inRange(hsv, np.array(self._cfg.heart_red_lower_2), np.array(self._cfg.heart_red_upper_2))
-        red_mask = red1 | red2
-        kernel = np.ones((2, 2), np.uint8)
-        red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_OPEN, kernel)
-        red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, kernel)
-        contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        areas = [cv2.contourArea(c) for c in contours if cv2.contourArea(c) >= self._cfg.heart_min_area]
-        if not areas:
-            return 0, 0
-        median_area = float(np.median(areas))
-        heart_count = sum(max(1, round(a / median_area)) for a in areas)
-        max_hp = heart_count * HP_PER_HEART
-        hp = max_hp
+    def _read_hp_ocr(self, frame: np.ndarray, w: int, h: int) -> tuple[int, int]:
+        roi = self._crop(frame, self._cfg.life_text_region, w, h)
+        if roi.size == 0:
+            return 0, self._last_max_hp
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        gray = cv2.resize(gray, None, fx=self._cfg.ocr_scale, fy=self._cfg.ocr_scale, interpolation=cv2.INTER_CUBIC)
+
+        votes: dict[tuple[int, int], int] = {}
+        for t in self._cfg.ocr_thresholds:
+            _, thresh = cv2.threshold(gray, t, 255, cv2.THRESH_BINARY)
+            text = pytesseract.image_to_string(thresh, config=_TESS_CFG).strip()
+            m = _HP_RE.search(text)
+            if m:
+                pair = (int(m.group(1)), int(m.group(2)))
+                votes[pair] = votes.get(pair, 0) + 1
+
+        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        text = pytesseract.image_to_string(otsu, config=_TESS_CFG).strip()
+        m = _HP_RE.search(text)
+        if m:
+            pair = (int(m.group(1)), int(m.group(2)))
+            votes[pair] = votes.get(pair, 0) + 2
+
+        if not votes:
+            return 0, self._last_max_hp
+
+        best = max(votes, key=lambda k: votes[k])
+        hp, max_hp = best
+        if max_hp > 0:
+            self._last_max_hp = max_hp
+        else:
+            max_hp = self._last_max_hp
+        hp = min(hp, max_hp)
         return hp, max_hp
 
     def _read_selected_slot(self, frame: np.ndarray, w: int, h: int) -> int:
