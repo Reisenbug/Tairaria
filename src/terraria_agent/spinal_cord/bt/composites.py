@@ -18,12 +18,14 @@ class Sequence(Node):
 
     def tick(self, ctx: TickContext) -> Status:
         for i in range(self._running_idx, len(self.children)):
-            status = self.children[i].tick(ctx)
+            child = self.children[i]
+            status = child.tick(ctx)
             if status == Status.FAILURE:
                 self._running_idx = 0
                 return Status.FAILURE
             if status == Status.RUNNING:
                 self._running_idx = i
+                ctx.bt_trace.append(f"{self.name}>{child.name}")
                 return Status.RUNNING
         self._running_idx = 0
         return Status.SUCCESS
@@ -44,12 +46,15 @@ class Selector(Node):
 
     def tick(self, ctx: TickContext) -> Status:
         for i in range(self._running_idx, len(self.children)):
-            status = self.children[i].tick(ctx)
+            child = self.children[i]
+            status = child.tick(ctx)
             if status == Status.SUCCESS:
                 self._running_idx = 0
+                ctx.bt_trace.append(f"{self.name}>{child.name}")
                 return Status.SUCCESS
             if status == Status.RUNNING:
                 self._running_idx = i
+                ctx.bt_trace.append(f"{self.name}>{child.name}")
                 return Status.RUNNING
         self._running_idx = 0
         return Status.FAILURE
@@ -74,10 +79,12 @@ class PrioritySelector(Node):
             status = child.tick(ctx)
             if status == Status.SUCCESS:
                 self._reset_running(i)
+                ctx.bt_trace.append(f"{self.name}>{child.name}")
                 return Status.SUCCESS
             if status == Status.RUNNING:
                 self._reset_running(i)
                 self._last_running_idx = i
+                ctx.bt_trace.append(f"{self.name}>{child.name}")
                 return Status.RUNNING
         self._reset_running(None)
         return Status.FAILURE
@@ -112,6 +119,8 @@ class Parallel(Node):
                 successes += 1
             elif status == Status.FAILURE:
                 failures += 1
+            else:
+                ctx.bt_trace.append(f"{self.name}>{child.name}")
         if successes >= self.success_threshold:
             return Status.SUCCESS
         if failures > len(self.children) - self.success_threshold:
@@ -145,9 +154,11 @@ class DynamicSelector(Node):
             status = child.tick(ctx)
             if status == Status.SUCCESS:
                 self._running_idx = None
+                ctx.bt_trace.append(f"{self.name}>{child.name}")
                 return Status.SUCCESS
             if status == Status.RUNNING:
                 self._running_idx = i
+                ctx.bt_trace.append(f"{self.name}>{child.name}")
                 return Status.RUNNING
         self._running_idx = None
         return Status.FAILURE
