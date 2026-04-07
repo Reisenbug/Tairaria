@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 
 import numpy as np
 
@@ -84,13 +85,29 @@ def _find_terraria_window_windows() -> dict | None:
     }
 
 
-def _capture_macos_cg(wid: int) -> np.ndarray | None:
+def _cg_image_to_numpy(cg_image) -> np.ndarray | None:
     from Quartz import (
         CGImageGetBytesPerRow,
         CGImageGetDataProvider,
         CGImageGetHeight,
         CGImageGetWidth,
         CGDataProviderCopyData,
+    )
+
+    if cg_image is None:
+        return None
+    w = CGImageGetWidth(cg_image)
+    h = CGImageGetHeight(cg_image)
+    bpr = CGImageGetBytesPerRow(cg_image)
+    data_provider = CGImageGetDataProvider(cg_image)
+    raw = CGDataProviderCopyData(data_provider)
+    arr = np.frombuffer(raw, dtype=np.uint8).reshape((h, bpr // 4, 4))
+    bgra = arr[:h, :w, :]
+    return bgra[:, :, [2, 1, 0]]
+
+
+def _capture_macos_cg(wid: int) -> np.ndarray | None:
+    from Quartz import (
         CGRectNull,
         CGWindowListCreateImage,
         kCGWindowImageBoundsIgnoreFraming,
@@ -103,22 +120,62 @@ def _capture_macos_cg(wid: int) -> np.ndarray | None:
         wid,
         kCGWindowImageBoundsIgnoreFraming,
     )
-    if cg_image is None:
-        return None
+    return _cg_image_to_numpy(cg_image)
 
-    w = CGImageGetWidth(cg_image)
-    h = CGImageGetHeight(cg_image)
-    bpr = CGImageGetBytesPerRow(cg_image)
-    data_provider = CGImageGetDataProvider(cg_image)
-    raw = CGDataProviderCopyData(data_provider)
-    arr = np.frombuffer(raw, dtype=np.uint8).reshape((h, bpr // 4, 4))
-    bgra = arr[:h, :w, :]
-    return bgra[:, :, [2, 1, 0]]
+
+def _capture_macos_sck(wid: int, timeout: float = 2.0) -> np.ndarray | None:
+    """Capture via ScreenCaptureKit — works across Spaces and fullscreen."""
+    from ScreenCaptureKit import (
+        SCContentFilter,
+        SCScreenshotManager,
+        SCShareableContent,
+        SCStreamConfiguration,
+    )
+
+    result_holder: list[np.ndarray | None] = [None]
+    event = threading.Event()
+
+    def _on_shareable_content(content, error):
+        if error or content is None:
+            event.set()
+            return
+
+        target_window = None
+        for w in content.windows():
+            if w.windowID() == wid:
+                target_window = w
+                break
+
+        if target_window is None:
+            event.set()
+            return
+
+        content_filter = SCContentFilter.alloc().initWithDesktopIndependentWindow_(target_window)
+
+        config = SCStreamConfiguration.alloc().init()
+        config.setWidth_(1920)
+        config.setHeight_(1080)
+        config.setScalesToFit_(True)
+        config.setShowsCursor_(False)
+
+        def _on_image(cg_image, img_error):
+            if cg_image is not None:
+                result_holder[0] = _cg_image_to_numpy(cg_image)
+            event.set()
+
+        SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_(
+            content_filter, config, _on_image,
+        )
+
+    SCShareableContent.getShareableContentWithCompletionHandler_(_on_shareable_content)
+    event.wait(timeout=timeout)
+    return result_holder[0]
 
 
 class ScreenCapture:
     def __init__(self) -> None:
         self._window: dict | None = None
+        self._use_sck: bool | None = None
 
     def refresh_window(self) -> bool:
         self._window = _find_terraria_window()
@@ -133,9 +190,27 @@ class ScreenCapture:
             return None
 
         if sys.platform == "darwin" and "wid" in self._window:
-            frame = _capture_macos_cg(self._window["wid"])
-            if frame is not None:
-                return frame
+            wid = self._window["wid"]
+
+            if self._use_sck is None:
+                frame = _capture_macos_cg(wid)
+                if frame is not None:
+                    self._use_sck = False
+                    return frame
+                frame = _capture_macos_sck(wid)
+                if frame is not None:
+                    self._use_sck = True
+                    return frame
+                return None
+
+            if self._use_sck:
+                return _capture_macos_sck(wid)
+            else:
+                frame = _capture_macos_cg(wid)
+                if frame is not None:
+                    return frame
+                self._use_sck = None
+                return _capture_macos_sck(wid)
 
         import mss
 

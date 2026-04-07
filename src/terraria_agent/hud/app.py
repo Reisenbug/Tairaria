@@ -55,6 +55,7 @@ def run_hud(bridge: StateBridge, alpha: float = 0.85) -> None:
 
     _apply_macos_transparency(alpha)
     _start_hotkey_listener(bridge)
+    _focus_terraria()
 
     bridge.log("[hud] ready — F12 to toggle visibility")
 
@@ -93,6 +94,22 @@ def _apply_macos_transparency(alpha: float) -> None:
                 break
     except Exception as e:
         print(f"[HUD] Transparency unavailable: {e}")
+
+
+def _focus_terraria() -> None:
+    """Activate the Terraria app so it regains keyboard focus after HUD spawn."""
+    try:
+        from AppKit import NSRunningApplication, NSWorkspace  # type: ignore
+        apps = NSRunningApplication.runningApplicationsWithBundleIdentifier_("com.re-logic.terraria")
+        if not apps:
+            for app in NSWorkspace.sharedWorkspace().runningApplications():
+                if "Terraria" in (app.localizedName() or ""):
+                    app.activateWithOptions_(0)
+                    return
+        else:
+            apps[0].activateWithOptions_(0)
+    except Exception as e:
+        print(f"[HUD] Could not focus Terraria: {e}")
 
 
 def _start_hotkey_listener(bridge: StateBridge) -> None:

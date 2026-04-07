@@ -18,7 +18,9 @@ vision = [
     "numpy>=1.26",
     "opencv-python>=4.8",
     "Pillow>=10.0",
+    "pytesseract>=0.3",
     "pyobjc-framework-Quartz>=10.0",
+    "pyobjc-framework-ScreenCaptureKit>=10.0",
 ]
 hud = [
     "dearpygui>=2.0",
