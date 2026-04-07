@@ -125,6 +125,7 @@ def _capture_macos_cg(wid: int) -> np.ndarray | None:
 
 def _capture_macos_sck(wid: int, timeout: float = 2.0) -> np.ndarray | None:
     """Capture via ScreenCaptureKit — works across Spaces and fullscreen."""
+    from Foundation import NSDate, NSRunLoop
     from ScreenCaptureKit import (
         SCContentFilter,
         SCScreenshotManager,
@@ -133,11 +134,11 @@ def _capture_macos_sck(wid: int, timeout: float = 2.0) -> np.ndarray | None:
     )
 
     result_holder: list[np.ndarray | None] = [None]
-    event = threading.Event()
+    done = threading.Event()
 
     def _on_shareable_content(content, error):
         if error or content is None:
-            event.set()
+            done.set()
             return
 
         target_window = None
@@ -147,7 +148,7 @@ def _capture_macos_sck(wid: int, timeout: float = 2.0) -> np.ndarray | None:
                 break
 
         if target_window is None:
-            event.set()
+            done.set()
             return
 
         content_filter = SCContentFilter.alloc().initWithDesktopIndependentWindow_(target_window)
@@ -161,14 +162,19 @@ def _capture_macos_sck(wid: int, timeout: float = 2.0) -> np.ndarray | None:
         def _on_image(cg_image, img_error):
             if cg_image is not None:
                 result_holder[0] = _cg_image_to_numpy(cg_image)
-            event.set()
+            done.set()
 
         SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_(
             content_filter, config, _on_image,
         )
 
     SCShareableContent.getShareableContentWithCompletionHandler_(_on_shareable_content)
-    event.wait(timeout=timeout)
+
+    deadline = timeout
+    while not done.is_set() and deadline > 0:
+        NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.05))
+        deadline -= 0.05
+
     return result_holder[0]
 
 
