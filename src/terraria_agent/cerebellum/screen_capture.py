@@ -151,12 +151,19 @@ def _capture_macos_sck(wid: int, timeout: float = 2.0) -> np.ndarray | None:
             done.set()
             return
 
-        content_filter = SCContentFilter.alloc().initWithDesktopIndependentWindow_(target_window)
+        displays = content.displays()
+        if not displays:
+            done.set()
+            return
+        display = displays[0]
+
+        all_windows = content.windows()
+        exclude = [w for w in all_windows if w.windowID() != wid]
+        content_filter = SCContentFilter.alloc().initWithDisplay_includingWindows_(display, [target_window])
 
         config = SCStreamConfiguration.alloc().init()
         config.setWidth_(1920)
         config.setHeight_(1080)
-        config.setScalesToFit_(True)
         config.setShowsCursor_(False)
 
         def _on_image(cg_image, img_error):
