@@ -15,3 +15,4 @@ class TickContext:
     interrupt_brain: bool = False
     interrupt_reason: str = ""
     dt: float = 0.2
+    bt_trace: list[str] = field(default_factory=list)
