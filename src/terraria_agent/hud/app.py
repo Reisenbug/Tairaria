@@ -78,10 +78,9 @@ def run_hud(bridge: StateBridge, alpha: float = 0.85) -> None:
 
 
 def _apply_macos_transparency(alpha: float) -> None:
-    """Make HUD semi-transparent and non-focusable so it never steals focus from Terraria."""
+    """Use NSWindow.setAlphaValue_ to make DPG window semi-transparent on macOS."""
     try:
-        from AppKit import NSApp, NSFloatingWindowLevel  # type: ignore
-        from objc import informal_protocol  # noqa: F401
+        from AppKit import NSApp  # type: ignore
         app = NSApp() if callable(NSApp) else NSApp
         if app is None:
             return
@@ -91,31 +90,9 @@ def _apply_macos_transparency(alpha: float) -> None:
                 w.setAlphaValue_(alpha)
                 w.setOpaque_(False)
                 w.setMovableByWindowBackground_(True)
-                w.setLevel_(NSFloatingWindowLevel)
-                w.setIgnoresMouseEvents_(False)
-                w.setCanBecomeVisibleWithoutLogin_(True)
-                _swap_no_key(w)
                 break
     except Exception as e:
         print(f"[HUD] Transparency unavailable: {e}")
-
-
-def _swap_no_key(ns_window) -> None:
-    """Swizzle the NSWindow subclass so canBecomeKeyWindow returns False."""
-    try:
-        import objc
-        cls = ns_window.__class__
-        if getattr(cls, "_hud_swizzled", False):
-            return
-        new_method = objc.selector(
-            lambda self: False,
-            selector=b"canBecomeKeyWindow",
-            signature=b"B@:",
-        )
-        objc.classAddMethod(cls, b"canBecomeKeyWindow", new_method)
-        cls._hud_swizzled = True
-    except Exception as e:
-        print(f"[HUD] canBecomeKeyWindow swizzle failed: {e}")
 
 
 def _start_hotkey_listener(bridge: StateBridge) -> None:
