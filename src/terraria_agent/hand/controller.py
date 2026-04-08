@@ -10,7 +10,7 @@ from terraria_agent.hand.keymap import Keymap
 from terraria_agent.hand.key_state import KeyState
 
 pyautogui.PAUSE = 0.0
-pyautogui.FAILSAFE = True
+pyautogui.FAILSAFE = False
 
 MOUSE_BUTTONS = {"mouse1": "left", "mouse2": "right", "mouse3": "middle", "mouse4": "x1", "mouse5": "x2"}
 
@@ -102,7 +102,7 @@ class HandController:
             self.backend.press(key)
 
     def _handle_attack(self, action: GameAction) -> None:
-        if action.target:
+        if action.target and self._screen_safe(action.target):
             self.backend.move_to(int(action.target[0]), int(action.target[1]))
         bind = self.keymap.get_gameplay_key("use_item") or "mouse1"
         if bind in MOUSE_BUTTONS:
@@ -129,7 +129,7 @@ class HandController:
             self.backend.press(bind)
 
     def _handle_place_block(self, action: GameAction) -> None:
-        if action.target:
+        if action.target and self._screen_safe(action.target):
             self.backend.move_to(int(action.target[0]), int(action.target[1]))
         bind = self.keymap.get_gameplay_key("use_item") or "mouse1"
         if bind in MOUSE_BUTTONS:
@@ -138,13 +138,19 @@ class HandController:
             self.backend.press(bind)
 
     def _handle_interact(self, action: GameAction) -> None:
-        if action.target:
+        if action.target and self._screen_safe(action.target):
             self.backend.move_to(int(action.target[0]), int(action.target[1]))
         bind = self.keymap.get_gameplay_key("interact") or "mouse2"
         if bind in MOUSE_BUTTONS:
             self.backend.click(None, None, MOUSE_BUTTONS[bind])
         else:
             self.backend.press(bind)
+
+    def _screen_safe(self, target: tuple) -> bool:
+        w, h = pyautogui.size()
+        x, y = int(target[0]), int(target[1])
+        margin = 10
+        return margin <= x <= w - margin and margin <= y <= h - margin
 
     def _handle_craft(self) -> None:
         key = self.keymap.get_gameplay_key("inventory")

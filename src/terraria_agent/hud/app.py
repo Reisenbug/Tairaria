@@ -122,8 +122,16 @@ def _start_hotkey_listener(bridge: StateBridge) -> None:
     def _on_toggle():
         bridge.toggle_visibility()
 
+    def _on_emergency_pause():
+        if not bridge.is_paused():
+            bridge.set_paused(True)
+            bridge.log("[hud] emergency pause (option+shift+p) — agent stopped")
+
     try:
-        _hotkey_listener = keyboard.GlobalHotKeys({"<f12>": _on_toggle})
+        _hotkey_listener = keyboard.GlobalHotKeys({
+            "<f12>": _on_toggle,
+            "<alt>+<shift>+p": _on_emergency_pause,
+        })
         _hotkey_listener.daemon = True
         _hotkey_listener.start()
     except Exception as e:

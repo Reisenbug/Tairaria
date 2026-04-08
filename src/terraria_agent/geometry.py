@@ -4,21 +4,6 @@ from terraria_agent.models.game_state import Camera, Player
 
 TILE_SIZE = 16.0
 
-_backing_scale: float | None = None
-
-
-def backing_scale_factor() -> float:
-    global _backing_scale
-    if _backing_scale is not None:
-        return _backing_scale
-    try:
-        from AppKit import NSScreen  # type: ignore
-        screen = NSScreen.mainScreen()
-        _backing_scale = float(screen.backingScaleFactor()) if screen else 1.0
-    except Exception:
-        _backing_scale = 1.0
-    return _backing_scale
-
 
 def player_center_world(player: Player) -> tuple[float, float]:
     return (player.pos[0] + player.width / 2.0, player.pos[1] + player.height / 2.0)
@@ -27,8 +12,7 @@ def player_center_world(player: Player) -> tuple[float, float]:
 def world_to_screen(world_xy: tuple[float, float], camera: Camera) -> tuple[int, int]:
     sx = (world_xy[0] - camera.screen_pos[0]) * camera.zoom
     sy = (world_xy[1] - camera.screen_pos[1]) * camera.zoom
-    scale = backing_scale_factor()
-    return (int(sx / scale), int(sy / scale))
+    return (int(sx), int(sy))
 
 
 def tile_offset_world(player: Player, dx_tiles: float, dy_tiles: float) -> tuple[float, float]:
