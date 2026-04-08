@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from terraria_agent.geometry import world_to_screen
 from terraria_agent.models.actions import GameAction, ActionType
 from terraria_agent.spinal_cord.bt.core import Status
 from terraria_agent.spinal_cord.bt.leaves import Action
@@ -22,7 +23,8 @@ class ChopTree(Action):
                 ctx.action_buffer.append(GameAction(action=ActionType.SWITCH_SLOT, slot=i))
                 break
         nearest = min(trees, key=lambda o: o.distance)
-        ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=nearest.pos))
+        screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
+        ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
         return Status.SUCCESS
 
 
@@ -46,7 +48,8 @@ class OpenChest(Action):
         if not chests:
             return Status.FAILURE
         nearest = min(chests, key=lambda o: o.distance)
-        ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=nearest.pos))
+        screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
+        ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=screen_xy))
         return Status.SUCCESS
 
 
