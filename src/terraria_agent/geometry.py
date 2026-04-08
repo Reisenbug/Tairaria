@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import os
+
 from terraria_agent.models.game_state import Camera, Player
 
 TILE_SIZE = 16.0
+
+# Offset of the Terraria monitor in pyautogui logical coordinates.
+# Set TERRARIA_SCREEN_X / TERRARIA_SCREEN_Y env vars to override.
+_SCREEN_OFFSET_X = int(os.environ.get("TERRARIA_SCREEN_X", "-177"))
+_SCREEN_OFFSET_Y = int(os.environ.get("TERRARIA_SCREEN_Y", "-1080"))
 
 
 def player_center_world(player: Player) -> tuple[float, float]:
@@ -10,8 +17,8 @@ def player_center_world(player: Player) -> tuple[float, float]:
 
 
 def world_to_screen(world_xy: tuple[float, float], camera: Camera) -> tuple[int, int]:
-    sx = (world_xy[0] - camera.screen_pos[0]) * camera.zoom
-    sy = (world_xy[1] - camera.screen_pos[1]) * camera.zoom
+    sx = (world_xy[0] - camera.screen_pos[0]) * camera.zoom + _SCREEN_OFFSET_X
+    sy = (world_xy[1] - camera.screen_pos[1]) * camera.zoom + _SCREEN_OFFSET_Y
     return (int(sx), int(sy))
 
 

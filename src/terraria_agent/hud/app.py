@@ -130,7 +130,7 @@ def _start_hotkey_listener(bridge: StateBridge) -> None:
     try:
         _hotkey_listener = keyboard.GlobalHotKeys({
             "<f12>": _on_toggle,
-            "<alt>+<shift>+p": _on_emergency_pause,
+            "<ctrl>+<cmd>+b": _on_emergency_pause,
         })
         _hotkey_listener.daemon = True
         _hotkey_listener.start()
