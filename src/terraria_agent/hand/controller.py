@@ -166,10 +166,18 @@ class HandController:
             self.backend.press(bind)
 
     def _screen_safe(self, target: tuple) -> bool:
-        w, h = pyautogui.size()
+        from terraria_agent.geometry import _SCREEN_OFFSET_X, _SCREEN_OFFSET_Y
         x, y = int(target[0]), int(target[1])
         margin = 10
-        return margin <= x <= w - margin and margin <= y <= h - margin
+        sw = pyautogui.size().width
+        # x must be within the Terraria monitor width
+        if not (_SCREEN_OFFSET_X + margin <= x <= _SCREEN_OFFSET_X + sw - margin):
+            return False
+        # y: allow full range of whichever monitor Terraria is on
+        # Just check it's not absurdly out of range (±10000)
+        if not (-10000 <= y <= 10000):
+            return False
+        return True
 
     def _handle_craft(self) -> None:
         key = self.keymap.get_gameplay_key("inventory")
