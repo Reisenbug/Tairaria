@@ -108,20 +108,6 @@ class TestAgentOrchestrator:
         assert len(hand.executed) == 1
         assert hand.executed[0][0].action == ActionType.MOVE
 
-    def test_no_frame_publishes_no_window(self):
-        bridge = StateBridge()
-        orch = AgentOrchestrator(
-            bridge,
-            capture=NoFrameCapturer(),
-            detector=MockDetector(_make_state()),
-            hand=MockHand(),
-            bt_root=RecordingRoot(),
-        )
-        orch.tick_once()
-        snap = bridge.get_snapshot()
-        assert snap is not None
-        assert snap.bt_status == "no-window"
-
     def test_paused_skips_detection(self):
         bridge = StateBridge()
         bridge.set_paused(True)

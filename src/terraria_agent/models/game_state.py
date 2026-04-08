@@ -22,12 +22,20 @@ class TerrainType(str, Enum):
     LAVA = "lava"
 
 
+class Camera(BaseModel):
+    screen_pos: tuple[float, float] = (0.0, 0.0)
+    screen_size: tuple[int, int] = (0, 0)
+    zoom: float = 1.0
+
+
 class Player(BaseModel):
     hp: int
     max_hp: int
     mana: int = 0
     max_mana: int = 0
     pos: tuple[float, float]
+    width: float = 0.0
+    height: float = 0.0
     velocity: tuple[float, float] = (0.0, 0.0)
     direction: str = "right"
     buffs: list[str] = []
@@ -63,6 +71,7 @@ class WorldObject(BaseModel):
 
 class GameState(BaseModel):
     player: Player
+    camera: Camera = Camera()
     enemies: list[Enemy] = []
     threats: list[Threat] = []
     objects: list[WorldObject] = []
