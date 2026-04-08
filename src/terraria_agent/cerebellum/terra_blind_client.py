@@ -41,18 +41,18 @@ class TerraBlindClient:
         return self._build_game_state(payload)
 
     def _build_game_state(self, payload: dict) -> GameState:
-        p = payload.get("player", {})
-        eq = payload.get("equipment", {})
-        buffs_raw = payload.get("buffs", [])
+        p = payload.get("player") or {}
+        eq = payload.get("equipment") or {}
+        buffs_raw = payload.get("buffs") or []
 
         hp = int(p.get("hp", 0))
         max_hp = max(int(p.get("max_hp", 1)), 1)
         damage = self._damage.update(hp, max_hp, time.time())
 
-        pos = p.get("pos", {})
-        vel = p.get("vel", {})
+        pos = p.get("pos") or {}
+        vel = p.get("vel") or {}
 
-        hotbar_raw = eq.get("hotbar", [])
+        hotbar_raw = eq.get("hotbar") or []
         hotbar: list[Optional[str]] = [None] * 10
         for i, slot in enumerate(hotbar_raw[:10]):
             if not isinstance(slot, dict):

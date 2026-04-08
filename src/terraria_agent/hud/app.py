@@ -35,7 +35,7 @@ def run_hud(bridge: StateBridge, alpha: float = 0.85) -> None:
         label = "Resume" if bridge.is_paused() else "Pause"
         dpg.configure_item(PAUSE_BTN, label=label)
 
-    with dpg.window(tag=MAIN_WINDOW, no_title_bar=False, label="Terraria Agent"):
+    with dpg.window(tag=MAIN_WINDOW, no_title_bar=True, no_move=True, no_resize=True, no_collapse=True, label="Terraria Agent", pos=(0, 0), width=420, height=760):
         with dpg.group(horizontal=True):
             dpg.add_button(label="Pause", tag=PAUSE_BTN, callback=_toggle_pause)
             dpg.add_text("●", tag=STATUS_DOT, color=(0, 255, 0))
@@ -49,7 +49,6 @@ def run_hud(bridge: StateBridge, alpha: float = 0.85) -> None:
         command_panel.create(bridge)
         log_panel.create(bridge)
 
-    dpg.set_primary_window(MAIN_WINDOW, True)
     dpg.setup_dearpygui()
     dpg.show_viewport()
 
@@ -90,7 +89,7 @@ def _apply_macos_transparency(alpha: float) -> None:
             if "Terraria Agent" in title:
                 w.setAlphaValue_(alpha)
                 w.setOpaque_(False)
-                w.setMovableByWindowBackground_(True)
+                w.setMovableByWindowBackground_(False)
                 break
     except Exception as e:
         print(f"[HUD] Transparency unavailable: {e}")
