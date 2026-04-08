@@ -19,6 +19,8 @@ class InputBackend(Protocol):
     def key_down(self, key: str) -> None: ...
     def key_up(self, key: str) -> None: ...
     def press(self, key: str) -> None: ...
+    def mouse_down(self, button: str) -> None: ...
+    def mouse_up(self, button: str) -> None: ...
     def click(self, x: int | None, y: int | None, button: str) -> None: ...
     def move_to(self, x: int, y: int) -> None: ...
 
@@ -29,6 +31,12 @@ class PyAutoGUIBackend:
 
     def key_up(self, key: str) -> None:
         pyautogui.keyUp(key)
+
+    def mouse_down(self, button: str) -> None:
+        pyautogui.mouseDown(button=button)
+
+    def mouse_up(self, button: str) -> None:
+        pyautogui.mouseUp(button=button)
 
     def press(self, key: str) -> None:
         pyautogui.press(key)
@@ -58,11 +66,17 @@ class HandController:
 
         current = self.key_state.held_keys
         for key in current - desired_holds:
-            self.backend.key_up(key)
+            self._release_key(key)
             self.key_state.release(key)
 
     def release_all(self) -> None:
         for key in self.key_state.release_all():
+            self._release_key(key)
+
+    def _release_key(self, key: str) -> None:
+        if key.startswith("mouse:"):
+            self.backend.mouse_up(key[6:])
+        else:
             self.backend.key_up(key)
 
     def _dispatch(self, action: GameAction, desired_holds: set[str]) -> None:
@@ -72,7 +86,7 @@ class HandController:
             case ActionType.JUMP:
                 self._handle_jump()
             case ActionType.ATTACK:
-                self._handle_attack(action)
+                self._handle_attack(action, desired_holds)
             case ActionType.SWITCH_SLOT:
                 self._handle_switch_slot(action)
             case ActionType.USE_ITEM:
@@ -101,14 +115,19 @@ class HandController:
         if key:
             self.backend.press(key)
 
-    def _handle_attack(self, action: GameAction) -> None:
+    def _handle_attack(self, action: GameAction, desired_holds: set[str]) -> None:
         if action.target and self._screen_safe(action.target):
             self.backend.move_to(int(action.target[0]), int(action.target[1]))
         bind = self.keymap.get_gameplay_key("use_item") or "mouse1"
         if bind in MOUSE_BUTTONS:
-            self.backend.click(None, None, MOUSE_BUTTONS[bind])
+            btn = MOUSE_BUTTONS[bind]
+            desired_holds.add(f"mouse:{btn}")
+            if self.key_state.press(f"mouse:{btn}"):
+                self.backend.mouse_down(btn)
         else:
-            self.backend.press(bind)
+            desired_holds.add(bind)
+            if self.key_state.press(bind):
+                self.backend.key_down(bind)
 
     def _handle_switch_slot(self, action: GameAction) -> None:
         if action.slot is None:

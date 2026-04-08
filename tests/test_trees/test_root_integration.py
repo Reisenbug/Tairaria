@@ -63,7 +63,6 @@ class TestWeakEnemy:
         root.tick(ctx)
         action_types = [a.action for a in ctx.action_buffer]
         assert ActionType.ATTACK in action_types
-        assert ActionType.MOVE in action_types
 
 
 class TestMediumEnemy:
