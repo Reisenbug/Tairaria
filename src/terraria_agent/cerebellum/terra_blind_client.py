@@ -7,7 +7,7 @@ import urllib.request
 from typing import Optional
 
 from terraria_agent.cerebellum.damage_detector import DamageDetector
-from terraria_agent.models.game_state import GameState, Player
+from terraria_agent.models.game_state import Camera, GameState, Player
 
 
 _DEFAULT_URL = "http://127.0.0.1:17878/state"
@@ -43,11 +43,17 @@ class TerraBlindClient:
     def _build_game_state(self, payload: dict) -> GameState:
         p = payload.get("player") or {}
         eq = payload.get("equipment") or {}
+        cam_raw = payload.get("camera") or {}
         buffs_raw = payload.get("buffs") or []
 
         hp = int(p.get("hp", 0))
         max_hp = max(int(p.get("max_hp", 1)), 1)
         damage = self._damage.update(hp, max_hp, time.time())
+
+        if "width" not in p or "height" not in p:
+            raise ValueError("TerraBlind payload missing player.width/height — mod outdated?")
+        if not cam_raw:
+            raise ValueError("TerraBlind payload missing camera — mod outdated?")
 
         pos = p.get("pos") or {}
         vel = p.get("vel") or {}
@@ -92,6 +98,8 @@ class TerraBlindClient:
             mana=int(p.get("mana", 0)),
             max_mana=int(p.get("max_mana", 0)),
             pos=(float(pos.get("x", 0.0)), float(pos.get("y", 0.0))),
+            width=float(p["width"]),
+            height=float(p["height"]),
             velocity=(float(vel.get("x", 0.0)), float(vel.get("y", 0.0))),
             direction=str(p.get("direction", "right")),
             buffs=[str(b.get("name", "")) for b in buffs_raw if isinstance(b, dict)],
@@ -102,7 +110,15 @@ class TerraBlindClient:
             selected_slot=int(eq.get("selected_slot", 0)),
             inventory_open=inventory_open,
         )
-        return GameState(player=player, hotbar=hotbar, equipped=equipped, inventory=inventory)
+        cam_pos = cam_raw.get("screen_pos") or {}
+        cam_size = cam_raw.get("screen_size") or {}
+        camera = Camera(
+            screen_pos=(float(cam_pos.get("x", 0.0)), float(cam_pos.get("y", 0.0))),
+            screen_size=(int(cam_size.get("w", 0)), int(cam_size.get("h", 0))),
+            zoom=float(cam_raw.get("zoom", 1.0)),
+        )
+
+        return GameState(player=player, camera=camera, hotbar=hotbar, equipped=equipped, inventory=inventory)
 
     def _empty_state(self) -> GameState:
         return GameState(player=Player(hp=0, max_hp=1, pos=(0.0, 0.0)))

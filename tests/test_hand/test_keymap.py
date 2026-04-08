@@ -9,12 +9,13 @@ class TestKeymap:
         assert km.gameplay["jump"] == "space"
         assert km.gameplay["use_item"] == "mouse1"
         assert km.gameplay["interact"] == "mouse2"
-        assert km.gameplay["quick_heal"] == "f"
+        assert km.gameplay["quick_heal"] == "g"
+        assert km.gameplay["dash"] == "f"
 
     def test_hotbar_keys(self):
         km = Keymap.load()
         assert km.get_hotbar_key(0) == "1"
-        assert km.get_hotbar_key(5) == "6"
+        assert km.get_hotbar_key(5) == "command"
         assert km.get_hotbar_key(6) == "z"
         assert km.get_hotbar_key(7) == "x"
         assert km.get_hotbar_key(8) == "c"
