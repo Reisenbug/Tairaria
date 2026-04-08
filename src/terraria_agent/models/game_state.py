@@ -49,11 +49,27 @@ class Player(BaseModel):
 
 
 class Enemy(BaseModel):
+    who: int = -1
+    type_id: int = 0
     type: str
     pos: tuple[float, float]
-    moving: str = "none"
+    velocity: tuple[float, float] = (0.0, 0.0)
+    width: float = 0.0
+    height: float = 0.0
+    hp: int = 0
+    max_hp: int = 1
+    boss: bool = False
     distance: float = 0.0
     threat: EnemyThreat = EnemyThreat.WEAK
+
+
+class TownNpc(BaseModel):
+    who: int = -1
+    type_id: int = 0
+    name: str = ""
+    display_name: str = ""
+    pos: tuple[float, float] = (0.0, 0.0)
+    homeless: bool = False
 
 
 class Threat(BaseModel):
@@ -73,6 +89,7 @@ class GameState(BaseModel):
     player: Player
     camera: Camera = Camera()
     enemies: list[Enemy] = []
+    town_npcs: list[TownNpc] = []
     threats: list[Threat] = []
     objects: list[WorldObject] = []
     terrain_ahead: TerrainType = TerrainType.FLAT
