@@ -25,7 +25,7 @@ def create(bridge: StateBridge) -> None:
         dpg.add_text("HP: --", tag=HP_TEXT)
         dpg.add_text("danger: safe", tag=DANGER, color=DANGER_COLORS["safe"])
         dpg.add_text("trend: stable", tag=TREND)
-        dpg.add_text("slot: 0", tag=SLOT)
+        dpg.add_text("slot: 1", tag=SLOT)
         dpg.add_text("buffs: -", tag=BUFFS)
         dpg.add_text("inventory: closed", tag=INVENTORY)
 
@@ -39,6 +39,6 @@ def update(snap: HUDSnapshot) -> None:
     dpg.set_value(DANGER, f"danger: {snap.danger_level}")
     dpg.configure_item(DANGER, color=color)
     dpg.set_value(TREND, f"trend: {snap.hp_trend}")
-    dpg.set_value(SLOT, f"slot: {snap.selected_slot}")
+    dpg.set_value(SLOT, f"slot: {snap.selected_slot + 1}")
     dpg.set_value(BUFFS, f"buffs: {', '.join(snap.buffs) if snap.buffs else '-'}")
     dpg.set_value(INVENTORY, f"inventory: {'open' if snap.inventory_open else 'closed'}")
