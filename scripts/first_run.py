@@ -16,6 +16,7 @@ Controls:
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 
@@ -50,7 +51,13 @@ FOCUS_DELAY = 3.0
 def main() -> None:
     bridge = StateBridge()
 
-    orch = AgentOrchestrator(bridge, tick_rate=5.0)
+    detector = None
+    source = os.environ.get("TERRARIA_AGENT_DETECTOR", "terra_blind").lower()
+    if source == "terra_blind":
+        from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient
+        detector = TerraBlindClient()
+
+    orch = AgentOrchestrator(bridge, tick_rate=5.0, detector=detector)
     orch._task_queue = TaskQueue(
         goal="walk left",
         task_queue=[

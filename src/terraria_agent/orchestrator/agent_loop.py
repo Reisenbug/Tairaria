@@ -120,10 +120,6 @@ class AgentOrchestrator:
             return
 
         frame = self._capture.capture()
-        if frame is None:
-            self._publish(_empty_state(), [], "no-window", "")
-            return
-
         game_state = self._detector.detect(frame)
 
         ctx = TickContext(
