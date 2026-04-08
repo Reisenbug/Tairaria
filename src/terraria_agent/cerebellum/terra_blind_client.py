@@ -64,6 +64,28 @@ class TerraBlindClient:
         held = eq.get("held_item", {}) or {}
         equipped = held.get("name") or "none"
 
+        inventory: dict[str, int] = {}
+        for slot in eq.get("inventory", []) or []:
+            if not isinstance(slot, dict):
+                continue
+            if int(slot.get("id", 0)) == 0:
+                continue
+            name = slot.get("name", "")
+            if not name:
+                continue
+            inventory[name] = inventory.get(name, 0) + int(slot.get("stack", 0))
+        for slot in hotbar_raw[:10]:
+            if not isinstance(slot, dict):
+                continue
+            if int(slot.get("id", 0)) == 0:
+                continue
+            name = slot.get("name", "")
+            if not name:
+                continue
+            inventory[name] = inventory.get(name, 0) + int(slot.get("stack", 0))
+
+        inventory_open = bool(eq.get("inventory_open", False))
+
         player = Player(
             hp=hp,
             max_hp=max_hp,
@@ -78,9 +100,9 @@ class TerraBlindClient:
             danger_level=damage.danger_level,
             hp_trend=damage.hp_trend,
             selected_slot=int(eq.get("selected_slot", 0)),
-            inventory_open=False,
+            inventory_open=inventory_open,
         )
-        return GameState(player=player, hotbar=hotbar, equipped=equipped)
+        return GameState(player=player, hotbar=hotbar, equipped=equipped, inventory=inventory)
 
     def _empty_state(self) -> GameState:
         return GameState(player=Player(hp=0, max_hp=1, pos=(0.0, 0.0)))
