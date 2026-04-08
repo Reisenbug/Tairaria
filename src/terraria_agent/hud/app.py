@@ -127,10 +127,19 @@ def _start_hotkey_listener(bridge: StateBridge) -> None:
             bridge.set_paused(True)
             bridge.log("[hud] emergency pause (option+shift+p) — agent stopped")
 
+    _mouse_control = [True]
+
+    def _on_toggle_mouse():
+        _mouse_control[0] = not _mouse_control[0]
+        state = "enabled" if _mouse_control[0] else "disabled"
+        bridge.set_mouse_control(_mouse_control[0])
+        bridge.log(f"[hud] mouse control {state} (ctrl+cmd+b)")
+
     try:
         _hotkey_listener = keyboard.GlobalHotKeys({
             "<f12>": _on_toggle,
-            "<ctrl>+<cmd>+b": _on_emergency_pause,
+            "<alt>+<shift>+p": _on_emergency_pause,
+            "<ctrl>+<cmd>+b": _on_toggle_mouse,
         })
         _hotkey_listener.daemon = True
         _hotkey_listener.start()
