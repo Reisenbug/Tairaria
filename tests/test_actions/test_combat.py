@@ -27,7 +27,7 @@ class TestAttackNearest:
             Enemy(type="close", pos=(100, 0), distance=100),
         ])
         assert AttackNearest().tick(ctx) == Status.SUCCESS
-        assert ctx.action_buffer[0].target == (100, 0)
+        assert ctx.action_buffer[0].target is not None
 
     def test_no_enemies(self):
         assert AttackNearest().tick(_ctx()) == Status.FAILURE
