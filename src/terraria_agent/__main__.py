@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 
 def main() -> None:
     from terraria_agent.hud.app import run_hud
@@ -7,7 +9,14 @@ def main() -> None:
     from terraria_agent.orchestrator.agent_loop import AgentOrchestrator
 
     bridge = StateBridge()
-    orchestrator = AgentOrchestrator(bridge, tick_rate=5.0)
+
+    detector = None
+    source = os.environ.get("TERRARIA_AGENT_DETECTOR", "terra_blind").lower()
+    if source == "terra_blind":
+        from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient
+        detector = TerraBlindClient()
+
+    orchestrator = AgentOrchestrator(bridge, tick_rate=5.0, detector=detector)
     orchestrator.start()
     try:
         run_hud(bridge)
