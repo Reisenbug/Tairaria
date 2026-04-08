@@ -64,7 +64,9 @@ class AgentOrchestrator:
         self._interval = 1.0 / tick_rate
         self._capture = capture if capture is not None else ScreenCapture()
         self._detector = detector if detector is not None else UIVisionDetector()
-        self._hand = hand if hand is not None else HandController()
+        self._hand = hand if hand is not None else HandController(
+            mouse_control_flag=bridge.is_mouse_control_enabled,
+        )
         self._bt_root = bt_root if bt_root is not None else build_root_tree()
         self._task_queue = TaskQueue(goal="idle", task_queue=[])
         self._tick_count = 0

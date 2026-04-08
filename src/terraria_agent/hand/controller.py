@@ -53,10 +53,12 @@ class HandController:
         self,
         keymap: Keymap | None = None,
         backend: InputBackend | None = None,
+        mouse_control_flag: "Callable[[], bool] | None" = None,
     ):
         self.keymap = keymap or Keymap.load()
         self.backend = backend or PyAutoGUIBackend()
         self.key_state = KeyState()
+        self._mouse_enabled: "Callable[[], bool]" = mouse_control_flag or (lambda: True)
 
     def execute(self, actions: list[GameAction]) -> None:
         desired_holds: set[str] = set()
@@ -116,7 +118,7 @@ class HandController:
             self.backend.press(key)
 
     def _handle_attack(self, action: GameAction, desired_holds: set[str]) -> None:
-        if action.target and self._screen_safe(action.target):
+        if action.target and self._screen_safe(action.target) and self._mouse_enabled():
             self.backend.move_to(int(action.target[0]), int(action.target[1]))
         bind = self.keymap.get_gameplay_key("use_item") or "mouse1"
         if bind in MOUSE_BUTTONS:
@@ -148,7 +150,7 @@ class HandController:
             self.backend.press(bind)
 
     def _handle_place_block(self, action: GameAction) -> None:
-        if action.target and self._screen_safe(action.target):
+        if action.target and self._screen_safe(action.target) and self._mouse_enabled():
             self.backend.move_to(int(action.target[0]), int(action.target[1]))
         bind = self.keymap.get_gameplay_key("use_item") or "mouse1"
         if bind in MOUSE_BUTTONS:
@@ -157,7 +159,7 @@ class HandController:
             self.backend.press(bind)
 
     def _handle_interact(self, action: GameAction) -> None:
-        if action.target and self._screen_safe(action.target):
+        if action.target and self._screen_safe(action.target) and self._mouse_enabled():
             self.backend.move_to(int(action.target[0]), int(action.target[1]))
         bind = self.keymap.get_gameplay_key("interact") or "mouse2"
         if bind in MOUSE_BUTTONS:

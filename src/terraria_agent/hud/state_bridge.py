@@ -95,6 +95,14 @@ class StateBridge:
         with self._lock:
             return self._paused
 
+    def set_mouse_control(self, value: bool) -> None:
+        with self._lock:
+            self._mouse_control = value
+
+    def is_mouse_control_enabled(self) -> bool:
+        with self._lock:
+            return getattr(self, "_mouse_control", True)
+
     def toggle_visibility(self) -> None:
         with self._lock:
             self._visible = not self._visible
