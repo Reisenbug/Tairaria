@@ -7,7 +7,8 @@ import urllib.request
 from typing import Optional
 
 from terraria_agent.cerebellum.damage_detector import DamageDetector
-from terraria_agent.models.game_state import Camera, GameState, Player
+from terraria_agent.geometry import player_center_world, world_distance_tiles
+from terraria_agent.models.game_state import Camera, Enemy, EnemyThreat, GameState, Player, TownNpc
 
 
 _DEFAULT_URL = "http://127.0.0.1:17878/state"
@@ -118,7 +119,63 @@ class TerraBlindClient:
             zoom=float(cam_raw.get("zoom", 1.0)),
         )
 
-        return GameState(player=player, camera=camera, hotbar=hotbar, equipped=equipped, inventory=inventory)
+        pcenter = player_center_world(player)
+
+        enemies: list[Enemy] = []
+        for e in payload.get("enemies") or []:
+            if not isinstance(e, dict):
+                continue
+            epos_raw = e.get("pos") or {}
+            epos = (float(epos_raw.get("x", 0.0)), float(epos_raw.get("y", 0.0)))
+            evel_raw = e.get("vel") or {}
+            dist = world_distance_tiles(pcenter, epos)
+            hp_e = int(e.get("hp", 0))
+            max_hp_e = max(int(e.get("max_hp", 1)), 1)
+            boss = bool(e.get("boss", False))
+            threat = (
+                EnemyThreat.BOSS if boss else
+                EnemyThreat.DANGEROUS if dist < 8 else
+                EnemyThreat.MEDIUM if dist < 20 else
+                EnemyThreat.WEAK
+            )
+            enemies.append(Enemy(
+                who=int(e.get("who", -1)),
+                type_id=int(e.get("type", 0)),
+                type=str(e.get("name", "")),
+                pos=epos,
+                velocity=(float(evel_raw.get("x", 0.0)), float(evel_raw.get("y", 0.0))),
+                width=float(e.get("w", 0.0)),
+                height=float(e.get("h", 0.0)),
+                hp=hp_e,
+                max_hp=max_hp_e,
+                boss=boss,
+                distance=dist,
+                threat=threat,
+            ))
+
+        town_npcs: list[TownNpc] = []
+        for n in payload.get("town_npcs") or []:
+            if not isinstance(n, dict):
+                continue
+            npos_raw = n.get("pos") or {}
+            town_npcs.append(TownNpc(
+                who=int(n.get("who", -1)),
+                type_id=int(n.get("type", 0)),
+                name=str(n.get("name", "")),
+                display_name=str(n.get("display_name", "")),
+                pos=(float(npos_raw.get("x", 0.0)), float(npos_raw.get("y", 0.0))),
+                homeless=bool(n.get("homeless", False)),
+            ))
+
+        return GameState(
+            player=player,
+            camera=camera,
+            enemies=enemies,
+            town_npcs=town_npcs,
+            hotbar=hotbar,
+            equipped=equipped,
+            inventory=inventory,
+        )
 
     def _empty_state(self) -> GameState:
         return GameState(player=Player(hp=0, max_hp=1, pos=(0.0, 0.0)))
