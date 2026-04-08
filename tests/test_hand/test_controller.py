@@ -21,6 +21,12 @@ class MockBackend:
     def click(self, x, y, button: str) -> None:
         self.log.append(("click", x, y, button))
 
+    def mouse_down(self, button: str) -> None:
+        self.log.append(("mouse_down", button))
+
+    def mouse_up(self, button: str) -> None:
+        self.log.append(("mouse_up", button))
+
     def move_to(self, x: int, y: int) -> None:
         self.log.append(("move_to", x, y))
 
@@ -67,11 +73,17 @@ class TestAttack:
     def test_attack_moves_mouse_and_clicks(self, ctrl):
         ctrl.execute([GameAction(action=ActionType.ATTACK, target=(500.0, 300.0))])
         assert ("move_to", 500, 300) in _log(ctrl)
-        assert ("click", None, None, "left") in _log(ctrl)
+        assert ("mouse_down", "left") in _log(ctrl)
 
     def test_attack_without_target(self, ctrl):
         ctrl.execute([GameAction(action=ActionType.ATTACK)])
-        assert ("click", None, None, "left") in _log(ctrl)
+        assert ("mouse_down", "left") in _log(ctrl)
+
+    def test_attack_releases_when_no_longer_in_buffer(self, ctrl):
+        ctrl.execute([GameAction(action=ActionType.ATTACK)])
+        ctrl.backend.log.clear()
+        ctrl.execute([])
+        assert ("mouse_up", "left") in _log(ctrl)
 
 
 class TestSwitchSlot:
@@ -107,7 +119,7 @@ class TestParallelActions:
         log = _log(ctrl)
         assert ("key_down", "a") in log
         assert ("move_to", 500, 300) in log
-        assert ("click", None, None, "left") in log
+        assert ("mouse_down", "left") in log
 
     def test_move_and_jump(self, ctrl):
         ctrl.execute([

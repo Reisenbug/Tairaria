@@ -15,38 +15,11 @@ def build_threat_response_tree():
 
 
 def build_combat_tree():
-    """Handle enemies by threat level."""
-    return Selector(
+    """Handle enemies by threat level — weapon selection is Brain's job."""
+    return Sequence(
         children=[
-            Sequence(
-                children=[
-                    Selector(children=[IsSurrounded(), EnemyIsDangerous()], name="DangerCheck"),
-                    SwitchToBestWeapon(),
-                    AttackNearest(),
-                ],
-                name="DangerousCombat",
-            ),
-            Sequence(
-                children=[
-                    EnemyIsMedium(),
-                    HasEnemiesNearby(max_distance=400.0),
-                    SwitchToSword(),
-                    AttackNearest(),
-                ],
-                name="MediumCombat",
-            ),
-            Sequence(
-                children=[
-                    EnemyIsWeak(),
-                    HasEnemiesNearby(max_distance=400.0),
-                    Parallel(
-                        children=[AttackNearest(), MoveLeft()],
-                        success_threshold=1,
-                        name="AttackWhileMoving",
-                    ),
-                ],
-                name="WeakCombat",
-            ),
+            HasEnemiesNearby(max_distance=400.0),
+            AttackNearest(),
         ],
         name="Combat",
     )
