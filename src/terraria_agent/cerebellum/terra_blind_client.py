@@ -14,6 +14,12 @@ from terraria_agent.models.game_state import Camera, Enemy, EnemyThreat, GameSta
 _DEFAULT_URL = "http://127.0.0.1:17878/state"
 _TIMEOUT_SEC = 0.1
 
+_THREAT_OVERRIDES: dict[int, EnemyThreat] = {
+    51:  EnemyThreat.DANGEROUS,  # Jungle Bat
+    43:  EnemyThreat.DANGEROUS,  # Man Eater
+    204: EnemyThreat.DANGEROUS,  # Spiked Jungle Slime
+}
+
 
 class TerraBlindClient:
     def __init__(self, url: str = _DEFAULT_URL, timeout: float = _TIMEOUT_SEC) -> None:
@@ -132,15 +138,18 @@ class TerraBlindClient:
             hp_e = int(e.get("hp", 0))
             max_hp_e = max(int(e.get("max_hp", 1)), 1)
             boss = bool(e.get("boss", False))
+            type_id = int(e.get("type", 0))
             threat = (
                 EnemyThreat.BOSS if boss else
-                EnemyThreat.DANGEROUS if dist < 8 else
-                EnemyThreat.MEDIUM if dist < 20 else
-                EnemyThreat.WEAK
+                _THREAT_OVERRIDES.get(type_id) or (
+                    EnemyThreat.DANGEROUS if dist < 8 else
+                    EnemyThreat.MEDIUM if dist < 20 else
+                    EnemyThreat.WEAK
+                )
             )
             enemies.append(Enemy(
                 who=int(e.get("who", -1)),
-                type_id=int(e.get("type", 0)),
+                type_id=type_id,
                 type=str(e.get("name", "")),
                 pos=epos,
                 velocity=(float(evel_raw.get("x", 0.0)), float(evel_raw.get("y", 0.0))),
