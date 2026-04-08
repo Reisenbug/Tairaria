@@ -122,8 +122,8 @@ class HandController:
         if bind in MOUSE_BUTTONS:
             btn = MOUSE_BUTTONS[bind]
             desired_holds.add(f"mouse:{btn}")
-            if self.key_state.press(f"mouse:{btn}"):
-                self.backend.mouse_down(btn)
+            self.key_state.press(f"mouse:{btn}")
+            self.backend.mouse_down(btn)
         else:
             desired_holds.add(bind)
             if self.key_state.press(bind):
