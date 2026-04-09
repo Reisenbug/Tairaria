@@ -22,6 +22,43 @@ class TerrainType(str, Enum):
     LAVA = "lava"
 
 
+class InventorySlot(BaseModel):
+    slot_index: int
+    id: int = 0
+    name: str = ""
+    stack: int = 0
+    damage: int = 0
+    pick: int = 0
+    axe: int = 0
+    hammer: int = 0
+    create_tile: int = -1
+    consumable: bool = False
+
+    @property
+    def is_empty(self) -> bool:
+        return self.id == 0
+
+    @property
+    def is_weapon(self) -> bool:
+        return self.damage > 0 and self.pick == 0 and self.axe == 0 and self.hammer == 0
+
+    @property
+    def is_pickaxe(self) -> bool:
+        return self.pick > 0
+
+    @property
+    def is_axe(self) -> bool:
+        return self.axe > 0
+
+    @property
+    def is_platform(self) -> bool:
+        return "platform" in self.name.lower()
+
+    @property
+    def is_block(self) -> bool:
+        return self.create_tile >= 0 and not self.is_platform
+
+
 class Camera(BaseModel):
     screen_pos: tuple[float, float] = (0.0, 0.0)
     screen_size: tuple[int, int] = (0, 0)
@@ -97,6 +134,7 @@ class GameState(BaseModel):
     equipped: str = "none"
     hotbar: list[Optional[str]] = [None] * 10
     inventory: dict[str, int] = {}
+    inventory_slots: list[InventorySlot] = []
     is_dark: bool = False
     time_of_day: str = "day"
     biome: str = "forest"
