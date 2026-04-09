@@ -8,7 +8,7 @@ from typing import Optional
 
 from terraria_agent.cerebellum.damage_detector import DamageDetector
 from terraria_agent.geometry import player_center_world, world_distance_tiles
-from terraria_agent.models.game_state import Camera, Enemy, EnemyThreat, GameState, Player, TownNpc
+from terraria_agent.models.game_state import Camera, Enemy, EnemyThreat, GameState, InventorySlot, Player, TownNpc
 
 
 _DEFAULT_URL = "http://127.0.0.1:17878/state"
@@ -66,36 +66,46 @@ class TerraBlindClient:
         vel = p.get("vel") or {}
 
         hotbar_raw = eq.get("hotbar") or []
+        inv_raw = eq.get("inventory") or []
+        coins_raw = eq.get("coins") or []
+        ammo_raw = eq.get("ammo") or []
+
+        inventory_slots: list[InventorySlot] = []
+        slot_sources = [
+            (hotbar_raw, 0, 10),
+            (inv_raw, 10, 40),
+            (coins_raw, 50, 4),
+            (ammo_raw, 54, 4),
+        ]
+        for raw_list, base_idx, count in slot_sources:
+            for i in range(count):
+                raw = raw_list[i] if i < len(raw_list) and isinstance(raw_list[i], dict) else {}
+                inventory_slots.append(InventorySlot(
+                    slot_index=base_idx + i,
+                    id=int(raw.get("id", 0)),
+                    name=raw.get("name", ""),
+                    stack=int(raw.get("stack", 0)),
+                    damage=int(raw.get("damage", 0)),
+                    pick=int(raw.get("pick", 0)),
+                    axe=int(raw.get("axe", 0)),
+                    hammer=int(raw.get("hammer", 0)),
+                    create_tile=int(raw.get("create_tile", -1)),
+                    consumable=bool(raw.get("consumable", False)),
+                ))
+
         hotbar: list[Optional[str]] = [None] * 10
-        for i, slot in enumerate(hotbar_raw[:10]):
-            if not isinstance(slot, dict):
-                continue
-            name = slot.get("name", "")
-            if name and int(slot.get("id", 0)) != 0:
-                hotbar[i] = name
+        for s in inventory_slots[:10]:
+            if not s.is_empty:
+                hotbar[s.slot_index] = s.name
 
         held = eq.get("held_item", {}) or {}
         equipped = held.get("name") or "none"
 
         inventory: dict[str, int] = {}
-        for slot in eq.get("inventory", []) or []:
-            if not isinstance(slot, dict):
+        for s in inventory_slots:
+            if s.is_empty:
                 continue
-            if int(slot.get("id", 0)) == 0:
-                continue
-            name = slot.get("name", "")
-            if not name:
-                continue
-            inventory[name] = inventory.get(name, 0) + int(slot.get("stack", 0))
-        for slot in hotbar_raw[:10]:
-            if not isinstance(slot, dict):
-                continue
-            if int(slot.get("id", 0)) == 0:
-                continue
-            name = slot.get("name", "")
-            if not name:
-                continue
-            inventory[name] = inventory.get(name, 0) + int(slot.get("stack", 0))
+            inventory[s.name] = inventory.get(s.name, 0) + s.stack
 
         inventory_open = bool(eq.get("inventory_open", False))
 
@@ -184,6 +194,7 @@ class TerraBlindClient:
             hotbar=hotbar,
             equipped=equipped,
             inventory=inventory,
+            inventory_slots=inventory_slots,
         )
 
     def _empty_state(self) -> GameState:
