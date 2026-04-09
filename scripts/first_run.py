@@ -48,6 +48,23 @@ from terraria_agent.orchestrator.agent_loop import AgentOrchestrator
 FOCUS_DELAY = 3.0
 
 
+def _organize_hotbar(orch: "AgentOrchestrator", bridge: StateBridge) -> None:
+    try:
+        frame = orch._capture.capture()
+        gs = orch._detector.detect(frame)
+        if not gs.inventory_slots:
+            bridge.log("[first_run] no inventory data — skip hotbar organize")
+            return
+        from terraria_agent.hand.hotbar_organizer import organize_hotbar
+        swaps = organize_hotbar(gs.inventory_slots)
+        if swaps:
+            bridge.log(f"[first_run] hotbar organized: {len(swaps)} swap(s)")
+        else:
+            bridge.log("[first_run] hotbar already organized")
+    except Exception as e:
+        bridge.log(f"[first_run] hotbar organize failed: {e}")
+
+
 def main() -> None:
     bridge = StateBridge()
 
@@ -117,6 +134,7 @@ def main() -> None:
                 focus_done = True
 
             if focus_done and not agent_started:
+                _organize_hotbar(orch, bridge)
                 orch.start()
                 agent_started = True
 
