@@ -12,7 +12,8 @@ from terraria_agent.hud.state_bridge import HUDSnapshot, StateBridge
 from terraria_agent.models.actions import GameAction
 from terraria_agent.models.game_state import GameState, Player
 from terraria_agent.models.task_queue import Task, TaskPriority, TaskQueue
-from terraria_agent.spinal_cord.bt.core import Status
+from terraria_agent.spinal_cord.actions.movement import MineForward
+from terraria_agent.spinal_cord.bt.core import Node, Status
 from terraria_agent.spinal_cord.context import TickContext
 from terraria_agent.spinal_cord.trees.root import build_root_tree
 
@@ -70,6 +71,7 @@ class AgentOrchestrator:
         self._bt_root = bt_root if bt_root is not None else build_root_tree()
         self._task_queue = TaskQueue(goal="idle", task_queue=[])
         self._smart_cursor = False
+        self._oneshot: Node | None = None
         self._tick_count = 0
         self._tps = 0.0
         self._last_tick_time = 0.0
@@ -131,11 +133,21 @@ class AgentOrchestrator:
             dt=self._interval,
             smart_cursor=self._smart_cursor,
         )
-        try:
-            status = self._bt_root.tick(ctx)
-        except Exception:
-            self._bridge.log(f"[bt] tick error: {traceback.format_exc(limit=2)}")
-            return
+        oneshot = self._oneshot
+        self._oneshot = None
+        if oneshot is not None:
+            try:
+                status = oneshot.tick(ctx)
+                self._bridge.log(f"[oneshot] {oneshot.name} -> {status.value}")
+            except Exception:
+                self._bridge.log(f"[oneshot] tick error: {traceback.format_exc(limit=2)}")
+                return
+        else:
+            try:
+                status = self._bt_root.tick(ctx)
+            except Exception:
+                self._bridge.log(f"[bt] tick error: {traceback.format_exc(limit=2)}")
+                return
 
         try:
             self._hand.execute(ctx.action_buffer)
@@ -206,6 +218,10 @@ class AgentOrchestrator:
         if lower in ("smart_cursor", "smartcursor", "sc"):
             self._smart_cursor = not self._smart_cursor
             self._bridge.log(f"[cmd] smart_cursor={'ON' if self._smart_cursor else 'OFF'}")
+            return
+        if lower in ("mine", "mine_forward", "mineforward"):
+            self._oneshot = MineForward(name="MineForward(oneshot)")
+            self._bridge.log("[cmd] mine_forward queued (next tick)")
             return
         if lower.startswith("goal:"):
             goal = text.split(":", 1)[1].strip()

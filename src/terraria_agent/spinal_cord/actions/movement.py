@@ -68,6 +68,7 @@ class MineForward(Action):
         target_world = tile_offset_world(ctx.game_state.player, sign * self.dx_tiles, self.dy_tiles)
         screen_xy = world_to_screen(target_world, ctx.game_state.camera)
         ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
+        ctx.bt_trace.append(f"MineForward({facing},slot={pickaxe_slot})@{screen_xy[0]},{screen_xy[1]}")
         return Status.SUCCESS
 
 
