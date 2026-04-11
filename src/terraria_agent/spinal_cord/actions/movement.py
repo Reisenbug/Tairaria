@@ -10,15 +10,24 @@ if TYPE_CHECKING:
     from terraria_agent.spinal_cord.context import TickContext
 
 
+_STUCK_VELOCITY = 0.1
+
+
+def _emit_move(ctx: TickContext, direction: str) -> None:
+    ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction=direction))
+    if abs(ctx.game_state.player.velocity[0]) < _STUCK_VELOCITY:
+        ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
+
+
 class MoveLeft(Action):
     def execute(self, ctx: TickContext) -> Status:
-        ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction="left"))
+        _emit_move(ctx, "left")
         return Status.SUCCESS
 
 
 class MoveRight(Action):
     def execute(self, ctx: TickContext) -> Status:
-        ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction="right"))
+        _emit_move(ctx, "right")
         return Status.SUCCESS
 
 
@@ -50,5 +59,5 @@ class MoveToObject(Action):
             return Status.SUCCESS
         player_x = ctx.game_state.player.pos[0]
         direction = "right" if nearest.pos[0] > player_x else "left"
-        ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction=direction))
+        _emit_move(ctx, direction)
         return Status.RUNNING
