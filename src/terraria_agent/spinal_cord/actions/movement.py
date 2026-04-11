@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from terraria_agent.geometry import tile_offset_world, world_to_screen
 from terraria_agent.models.actions import GameAction, ActionType
 from terraria_agent.spinal_cord.bt.core import Status
 from terraria_agent.spinal_cord.bt.leaves import Action
@@ -42,6 +43,31 @@ class PlacePlatform(Action):
         if ctx.game_state.inventory.get("platform", 0) <= 0:
             return Status.FAILURE
         ctx.action_buffer.append(GameAction(action=ActionType.PLACE_BLOCK, item="platform"))
+        return Status.SUCCESS
+
+
+class MineForward(Action):
+    def __init__(self, dx_tiles: float = 1.0, dy_tiles: float = 0.0, name: str = ""):
+        super().__init__(name)
+        self.dx_tiles = dx_tiles
+        self.dy_tiles = dy_tiles
+
+    def execute(self, ctx: TickContext) -> Status:
+        pickaxe_slot = None
+        for slot in ctx.game_state.inventory_slots[:10]:
+            if slot.is_pickaxe:
+                pickaxe_slot = slot.slot_index
+                break
+        if pickaxe_slot is None:
+            return Status.FAILURE
+        if ctx.game_state.player.selected_slot != pickaxe_slot:
+            ctx.action_buffer.append(GameAction(action=ActionType.SWITCH_SLOT, slot=pickaxe_slot))
+
+        facing = ctx.game_state.player.direction
+        sign = 1.0 if facing == "right" else -1.0
+        target_world = tile_offset_world(ctx.game_state.player, sign * self.dx_tiles, self.dy_tiles)
+        screen_xy = world_to_screen(target_world, ctx.game_state.camera)
+        ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
         return Status.SUCCESS
 
 

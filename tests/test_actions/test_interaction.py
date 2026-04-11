@@ -63,3 +63,24 @@ class TestOpenChest:
 
     def test_no_chest(self):
         assert OpenChest().tick(_ctx()) == Status.FAILURE
+
+    def test_smart_cursor_targets_between_player_and_chest(self):
+        ctx = _ctx(
+            objects=[WorldObject(type="chest", pos=(100, 0), distance=100)],
+            player_pos=(0, 0),
+        )
+        ctx.smart_cursor = True
+        assert OpenChest().tick(ctx) == Status.SUCCESS
+        action = ctx.action_buffer[0]
+        assert action.action == ActionType.INTERACT
+        # midpoint target (world 50 vs chest 100 in plain ctx without camera offset)
+        assert action.target is not None
+
+    def test_smart_cursor_off_targets_chest_position(self):
+        ctx = _ctx(
+            objects=[WorldObject(type="chest", pos=(100, 0), distance=100)],
+            player_pos=(0, 0),
+        )
+        assert ctx.smart_cursor is False
+        assert OpenChest().tick(ctx) == Status.SUCCESS
+        assert ctx.action_buffer[0].target is not None

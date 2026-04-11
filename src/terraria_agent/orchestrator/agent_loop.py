@@ -69,6 +69,7 @@ class AgentOrchestrator:
         )
         self._bt_root = bt_root if bt_root is not None else build_root_tree()
         self._task_queue = TaskQueue(goal="idle", task_queue=[])
+        self._smart_cursor = False
         self._tick_count = 0
         self._tps = 0.0
         self._last_tick_time = 0.0
@@ -128,6 +129,7 @@ class AgentOrchestrator:
             game_state=game_state,
             task_queue=self._task_queue,
             dt=self._interval,
+            smart_cursor=self._smart_cursor,
         )
         try:
             status = self._bt_root.tick(ctx)
@@ -192,6 +194,18 @@ class AgentOrchestrator:
         if lower == "clear":
             self._task_queue = TaskQueue(goal=self._task_queue.goal, task_queue=[])
             self._bridge.log("[cmd] task queue cleared")
+            return
+        if lower in ("smart_cursor on", "smartcursor on", "sc on"):
+            self._smart_cursor = True
+            self._bridge.log("[cmd] smart_cursor=ON")
+            return
+        if lower in ("smart_cursor off", "smartcursor off", "sc off"):
+            self._smart_cursor = False
+            self._bridge.log("[cmd] smart_cursor=OFF")
+            return
+        if lower in ("smart_cursor", "smartcursor", "sc"):
+            self._smart_cursor = not self._smart_cursor
+            self._bridge.log(f"[cmd] smart_cursor={'ON' if self._smart_cursor else 'OFF'}")
             return
         if lower.startswith("goal:"):
             goal = text.split(":", 1)[1].strip()
