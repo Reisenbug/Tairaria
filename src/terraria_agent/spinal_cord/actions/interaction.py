@@ -48,8 +48,17 @@ class OpenChest(Action):
         if not chests:
             return Status.FAILURE
         nearest = min(chests, key=lambda o: o.distance)
-        screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
-        ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=screen_xy))
+        if ctx.smart_cursor:
+            player_screen = world_to_screen(ctx.game_state.player.pos, ctx.game_state.camera)
+            chest_screen = world_to_screen(nearest.pos, ctx.game_state.camera)
+            nearby = (
+                (player_screen[0] + chest_screen[0]) / 2,
+                (player_screen[1] + chest_screen[1]) / 2,
+            )
+            ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=nearby))
+        else:
+            screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
+            ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=screen_xy))
         return Status.SUCCESS
 
 
