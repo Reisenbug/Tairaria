@@ -56,9 +56,11 @@ class OpenChest(Action):
                 (player_screen[1] + chest_screen[1]) / 2,
             )
             ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=nearby))
+            ctx.bt_trace.append(f"OpenChest(sc=on)@{int(nearby[0])},{int(nearby[1])}")
         else:
             screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
             ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=screen_xy))
+            ctx.bt_trace.append(f"OpenChest(sc=off)@{screen_xy[0]},{screen_xy[1]}")
         return Status.SUCCESS
 
 

@@ -9,7 +9,9 @@ HINT = (
     "commands:\n"
     "  goal: <text>\n"
     "  task: <trigger> <action> [priority]\n"
-    "  clear | pause | resume"
+    "  clear | pause | resume\n"
+    "  sc [on|off]   smart cursor flag\n"
+    "  mine          one-shot MineForward"
 )
 
 
