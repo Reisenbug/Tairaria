@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 import time
 from pathlib import Path
 from typing import Protocol
@@ -16,10 +15,15 @@ pyautogui.FAILSAFE = False
 
 
 def _activate_terraria() -> None:
-    subprocess.run(
-        ["osascript", "-e", 'tell application "System Events" to set frontmost of process "Terraria" to true'],
-        capture_output=True, timeout=1,
-    )
+    try:
+        from AppKit import NSWorkspace, NSApplicationActivateIgnoringOtherApps
+        ws = NSWorkspace.sharedWorkspace()
+        for app in ws.runningApplications():
+            if "Terraria" in (app.localizedName() or ""):
+                app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+                return
+    except Exception:
+        pass
 
 MOUSE_BUTTONS = {"mouse1": "left", "mouse2": "right", "mouse3": "middle", "mouse4": "x1", "mouse5": "x2"}
 
