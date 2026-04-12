@@ -252,6 +252,7 @@ class TerraBlindClient:
             tile_window=tile_window,
             objects=objects,
             dropped_items=dropped_items,
+            chest_open=bool(eq.get("chest_open", False)),
             smart_cursor=bool(eq.get("smart_cursor", False)),
         )
 

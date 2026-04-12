@@ -53,6 +53,9 @@ class EnsureSmartCursorOn(Action):
 
 class OpenChest(Action):
     def execute(self, ctx: TickContext) -> Status:
+        if ctx.game_state.chest_open:
+            ctx.bt_trace.append("OpenChest: already open")
+            return Status.SUCCESS
         chests = [o for o in ctx.game_state.objects if o.type == "chest"]
         if not chests:
             return Status.FAILURE
@@ -65,6 +68,15 @@ class OpenChest(Action):
         )
         ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=nearby))
         ctx.bt_trace.append(f"OpenChest@{int(nearby[0])},{int(nearby[1])}")
+        return Status.RUNNING
+
+
+class LootAll(Action):
+    def execute(self, ctx: TickContext) -> Status:
+        if not ctx.game_state.chest_open:
+            return Status.FAILURE
+        ctx.action_buffer.append(GameAction(action=ActionType.LOOT_ALL))
+        ctx.bt_trace.append("LootAll")
         return Status.SUCCESS
 
 

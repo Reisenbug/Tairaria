@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import urllib.request
 from pathlib import Path
 from typing import Protocol
 
@@ -12,6 +13,10 @@ from terraria_agent.hand.key_state import KeyState
 
 pyautogui.PAUSE = 0.0
 pyautogui.FAILSAFE = False
+
+_LOOT_ALL_URL = "http://127.0.0.1:17878/loot_all"
+_NO_PROXY_HANDLER = urllib.request.ProxyHandler({})
+_OPENER = urllib.request.build_opener(_NO_PROXY_HANDLER)
 
 
 def _activate_terraria() -> None:
@@ -128,6 +133,8 @@ class HandController:
                 self._handle_craft()
             case ActionType.KEY_PRESS:
                 self._handle_key_press(action)
+            case ActionType.LOOT_ALL:
+                self._handle_loot_all()
             case ActionType.PICK_UP:
                 pass
             case ActionType.NONE:
@@ -198,6 +205,13 @@ class HandController:
             self.backend.click(None, None, MOUSE_BUTTONS[bind])
         else:
             self.backend.press(bind)
+
+    def _handle_loot_all(self) -> None:
+        try:
+            with _OPENER.open(_LOOT_ALL_URL, timeout=0.5) as resp:
+                resp.read()
+        except Exception:
+            pass
 
     def _handle_key_press(self, action: GameAction) -> None:
         key_name = action.item or ""

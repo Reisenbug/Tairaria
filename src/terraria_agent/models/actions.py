@@ -17,6 +17,7 @@ class ActionType(str, Enum):
     CRAFT = "craft"
     PICK_UP = "pick_up"
     KEY_PRESS = "key_press"
+    LOOT_ALL = "loot_all"
     NONE = "none"
 
 

@@ -6,7 +6,7 @@ from terraria_agent.spinal_cord.bt import DynamicSelector, Sequence
 from terraria_agent.spinal_cord.bt.core import Node
 from terraria_agent.spinal_cord.bt.leaves import Condition
 from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveToObject
-from terraria_agent.spinal_cord.actions.interaction import ChopTree, PickUpValuableDrop, OpenChest, EnsureSmartCursorOn
+from terraria_agent.spinal_cord.actions.interaction import ChopTree, PickUpValuableDrop, OpenChest, EnsureSmartCursorOn, LootAll
 from terraria_agent.spinal_cord.actions.crafting import CraftPlatforms
 
 if TYPE_CHECKING:
@@ -48,6 +48,7 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
                 MoveToObject("chest"),
                 EnsureSmartCursorOn(),
                 OpenChest(),
+                LootAll(),
             ],
             name="Task_chest_nearby",
         )
