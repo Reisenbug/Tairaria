@@ -27,6 +27,17 @@ def _activate_terraria() -> None:
 
 MOUSE_BUTTONS = {"mouse1": "left", "mouse2": "right", "mouse3": "middle", "mouse4": "x1", "mouse5": "x2"}
 
+_KEY_ALIAS = {
+    "leftctrl": "ctrlleft", "rightctrl": "ctrlright",
+    "leftshift": "shiftleft", "rightshift": "shiftright",
+    "leftalt": "altleft", "rightalt": "altright",
+    "leftcommand": "command", "oem_tilde": "`",
+}
+
+
+def _translate_key(key: str) -> str:
+    return _KEY_ALIAS.get(key, key)
+
 
 class InputBackend(Protocol):
     def key_down(self, key: str) -> None: ...
@@ -40,10 +51,10 @@ class InputBackend(Protocol):
 
 class PyAutoGUIBackend:
     def key_down(self, key: str) -> None:
-        pyautogui.keyDown(key)
+        pyautogui.keyDown(_translate_key(key))
 
     def key_up(self, key: str) -> None:
-        pyautogui.keyUp(key)
+        pyautogui.keyUp(_translate_key(key))
 
     def mouse_down(self, button: str) -> None:
         pyautogui.mouseDown(button=button)
@@ -52,7 +63,7 @@ class PyAutoGUIBackend:
         pyautogui.mouseUp(button=button)
 
     def press(self, key: str) -> None:
-        pyautogui.press(key)
+        pyautogui.press(_translate_key(key))
 
     def click(self, x: int | None, y: int | None, button: str) -> None:
         pyautogui.click(x=x, y=y, button=button)

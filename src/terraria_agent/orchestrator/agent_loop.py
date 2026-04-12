@@ -149,6 +149,8 @@ class AgentOrchestrator:
                 self._bridge.log(f"[bt] tick error: {traceback.format_exc(limit=2)}")
                 return
 
+        self._smart_cursor = ctx.smart_cursor
+
         try:
             self._hand.execute(ctx.action_buffer)
         except Exception:
