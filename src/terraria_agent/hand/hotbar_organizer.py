@@ -8,6 +8,8 @@ from terraria_agent.models.game_state import InventorySlot
 
 
 _SWAP_URL = "http://127.0.0.1:17878/swap"
+_NO_PROXY_HANDLER = urllib.request.ProxyHandler({})
+_OPENER = urllib.request.build_opener(_NO_PROXY_HANDLER)
 
 
 @dataclass
@@ -69,7 +71,7 @@ def plan_hotbar_swaps(
 def swap_slot(src: int, dst: int) -> bool:
     try:
         url = f"{_SWAP_URL}?src={src}&dst={dst}"
-        with urllib.request.urlopen(url, timeout=0.5) as resp:
+        with _OPENER.open(url, timeout=0.5) as resp:
             return resp.status == 200
     except Exception:
         return False
