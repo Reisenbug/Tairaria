@@ -42,25 +42,31 @@ class PickUpValuableDrop(Action):
         return Status.RUNNING if nearest.distance > 10.0 else Status.SUCCESS
 
 
+class ToggleSmartCursor(Action):
+    def execute(self, ctx: TickContext) -> Status:
+        ctx.action_buffer.append(GameAction(action=ActionType.KEY_PRESS, item="smart_cursor"))
+        ctx.smart_cursor = not ctx.smart_cursor
+        ctx.bt_trace.append(f"SmartCursor={'ON' if ctx.smart_cursor else 'OFF'}")
+        return Status.SUCCESS
+
+
 class OpenChest(Action):
     def execute(self, ctx: TickContext) -> Status:
         chests = [o for o in ctx.game_state.objects if o.type == "chest"]
         if not chests:
             return Status.FAILURE
         nearest = min(chests, key=lambda o: o.distance)
-        if ctx.smart_cursor:
-            player_screen = world_to_screen(ctx.game_state.player.pos, ctx.game_state.camera)
-            chest_screen = world_to_screen(nearest.pos, ctx.game_state.camera)
-            nearby = (
-                (player_screen[0] + chest_screen[0]) / 2,
-                (player_screen[1] + chest_screen[1]) / 2,
-            )
-            ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=nearby))
-            ctx.bt_trace.append(f"OpenChest(sc=on)@{int(nearby[0])},{int(nearby[1])}")
-        else:
-            screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
-            ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=screen_xy))
-            ctx.bt_trace.append(f"OpenChest(sc=off)@{screen_xy[0]},{screen_xy[1]}")
+        if not ctx.smart_cursor:
+            ToggleSmartCursor().execute(ctx)
+            return Status.RUNNING
+        player_screen = world_to_screen(ctx.game_state.player.pos, ctx.game_state.camera)
+        chest_screen = world_to_screen(nearest.pos, ctx.game_state.camera)
+        nearby = (
+            (player_screen[0] + chest_screen[0]) / 2,
+            (player_screen[1] + chest_screen[1]) / 2,
+        )
+        ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=nearby))
+        ctx.bt_trace.append(f"OpenChest@{int(nearby[0])},{int(nearby[1])}")
         return Status.SUCCESS
 
 

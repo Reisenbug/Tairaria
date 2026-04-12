@@ -99,6 +99,8 @@ class HandController:
                 self._handle_interact(action)
             case ActionType.CRAFT:
                 self._handle_craft()
+            case ActionType.KEY_PRESS:
+                self._handle_key_press(action)
             case ActionType.PICK_UP:
                 pass
             case ActionType.NONE:
@@ -165,6 +167,12 @@ class HandController:
         if bind in MOUSE_BUTTONS:
             self.backend.click(None, None, MOUSE_BUTTONS[bind])
         else:
+            self.backend.press(bind)
+
+    def _handle_key_press(self, action: GameAction) -> None:
+        key_name = action.item or ""
+        bind = self.keymap.get_gameplay_key(key_name)
+        if bind:
             self.backend.press(bind)
 
     def _screen_safe(self, target: tuple) -> bool:
