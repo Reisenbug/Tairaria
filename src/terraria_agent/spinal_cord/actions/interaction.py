@@ -42,12 +42,13 @@ class PickUpValuableDrop(Action):
         return Status.RUNNING if nearest.distance > 10.0 else Status.SUCCESS
 
 
-class ToggleSmartCursor(Action):
+class EnsureSmartCursorOn(Action):
     def execute(self, ctx: TickContext) -> Status:
+        if ctx.game_state.smart_cursor:
+            return Status.SUCCESS
         ctx.action_buffer.append(GameAction(action=ActionType.KEY_PRESS, item="smart_cursor"))
-        ctx.smart_cursor = not ctx.smart_cursor
-        ctx.bt_trace.append(f"SmartCursor={'ON' if ctx.smart_cursor else 'OFF'}")
-        return Status.SUCCESS
+        ctx.bt_trace.append("SmartCursor->ON")
+        return Status.RUNNING
 
 
 class OpenChest(Action):
@@ -56,9 +57,6 @@ class OpenChest(Action):
         if not chests:
             return Status.FAILURE
         nearest = min(chests, key=lambda o: o.distance)
-        if not ctx.smart_cursor:
-            ToggleSmartCursor().execute(ctx)
-            return Status.RUNNING
         player_screen = world_to_screen(ctx.game_state.player.pos, ctx.game_state.camera)
         chest_screen = world_to_screen(nearest.pos, ctx.game_state.camera)
         nearby = (

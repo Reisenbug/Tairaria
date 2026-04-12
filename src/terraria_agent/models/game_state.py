@@ -186,6 +186,7 @@ class GameState(BaseModel):
     hotbar: list[Optional[str]] = [None] * 10
     inventory: dict[str, int] = {}
     inventory_slots: list[InventorySlot] = []
+    smart_cursor: bool = False
     is_dark: bool = False
     time_of_day: str = "day"
     biome: str = "forest"
