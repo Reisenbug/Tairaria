@@ -165,6 +165,15 @@ class TileWindow(BaseModel):
         return None
 
 
+class DroppedItem(BaseModel):
+    who: int = -1
+    type_id: int = 0
+    name: str = ""
+    stack: int = 0
+    pos: tuple[float, float] = (0.0, 0.0)
+    distance: float = 0.0
+
+
 class WorldObject(BaseModel):
     type: str
     pos: tuple[float, float]
@@ -180,6 +189,7 @@ class GameState(BaseModel):
     threats: list[Threat] = []
     tile_window: Optional[TileWindow] = None
     objects: list[WorldObject] = []
+    dropped_items: list[DroppedItem] = []
     terrain_ahead: TerrainType = TerrainType.FLAT
     terrain_behind: TerrainType = TerrainType.FLAT
     equipped: str = "none"

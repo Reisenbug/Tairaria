@@ -9,12 +9,13 @@ from typing import Optional
 from terraria_agent.cerebellum.damage_detector import DamageDetector
 from terraria_agent.geometry import player_center_world, world_distance_tiles
 from terraria_agent.models.game_state import (
-    Camera, Enemy, EnemyThreat, GameState, InventorySlot, Player,
-    TileRun, TileWindow, TownNpc, WorldObject,
+    Camera, DroppedItem, Enemy, EnemyThreat, GameState, InventorySlot,
+    Player, TileRun, TileWindow, TownNpc, WorldObject,
 )
 
 
-_DEFAULT_URL = "http://127.0.0.1:17878/state"
+_BASE_URL = "http://127.0.0.1:17878"
+_DEFAULT_URL = _BASE_URL + "/state"
 _TIMEOUT_SEC = 0.1
 
 _THREAT_OVERRIDES: dict[int, EnemyThreat] = {
@@ -223,6 +224,22 @@ class TerraBlindClient:
                 distance=dist,
             ))
 
+        dropped_items: list[DroppedItem] = []
+        for di in payload.get("dropped_items") or []:
+            if not isinstance(di, dict):
+                continue
+            dpos = di.get("pos") or {}
+            dwpos = (float(dpos.get("x", 0.0)), float(dpos.get("y", 0.0)))
+            dist = world_distance_tiles(pcenter, dwpos)
+            dropped_items.append(DroppedItem(
+                who=int(di.get("who", -1)),
+                type_id=int(di.get("type", 0)),
+                name=str(di.get("name", "")),
+                stack=int(di.get("stack", 0)),
+                pos=dwpos,
+                distance=dist,
+            ))
+
         return GameState(
             player=player,
             camera=camera,
@@ -234,6 +251,7 @@ class TerraBlindClient:
             inventory_slots=inventory_slots,
             tile_window=tile_window,
             objects=objects,
+            dropped_items=dropped_items,
             smart_cursor=bool(eq.get("smart_cursor", False)),
         )
 
@@ -243,6 +261,13 @@ class TerraBlindClient:
     def _note_error(self, kind: str) -> None:
         if self._last_error_kind != kind:
             self._last_error_kind = kind
+
+    def loot_all(self) -> bool:
+        try:
+            with _OPENER.open(_BASE_URL + "/loot_all", timeout=self._timeout) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
 
     def reset(self) -> None:
         self._damage.reset()
