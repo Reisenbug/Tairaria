@@ -116,9 +116,59 @@ class Threat(BaseModel):
     urgent: bool = False
 
 
+class TileRun(BaseModel):
+    type: int
+    sflags: int
+    count: int
+
+    @property
+    def active(self) -> bool:
+        return bool(self.sflags & 1)
+
+    @property
+    def solid(self) -> bool:
+        return bool(self.sflags & 2)
+
+    @property
+    def water(self) -> bool:
+        return bool(self.sflags & 4)
+
+    @property
+    def lava(self) -> bool:
+        return bool(self.sflags & 8)
+
+    @property
+    def honey(self) -> bool:
+        return bool(self.sflags & 16)
+
+    @property
+    def shimmer(self) -> bool:
+        return bool(self.sflags & 32)
+
+
+class TileWindow(BaseModel):
+    origin: tuple[int, int] = (0, 0)
+    width: int = 120
+    height: int = 80
+    rows: list[list[TileRun]] = []
+
+    def tile_at(self, world_x: int, world_y: int) -> Optional[TileRun]:
+        ry = world_y - self.origin[1]
+        rx = world_x - self.origin[0]
+        if ry < 0 or ry >= self.height or rx < 0 or rx >= self.width:
+            return None
+        col = 0
+        for run in self.rows[ry]:
+            if rx < col + run.count:
+                return run
+            col += run.count
+        return None
+
+
 class WorldObject(BaseModel):
     type: str
     pos: tuple[float, float]
+    tile_pos: tuple[int, int] = (0, 0)
     distance: float = 0.0
 
 
@@ -128,6 +178,7 @@ class GameState(BaseModel):
     enemies: list[Enemy] = []
     town_npcs: list[TownNpc] = []
     threats: list[Threat] = []
+    tile_window: Optional[TileWindow] = None
     objects: list[WorldObject] = []
     terrain_ahead: TerrainType = TerrainType.FLAT
     terrain_behind: TerrainType = TerrainType.FLAT

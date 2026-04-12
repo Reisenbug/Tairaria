@@ -8,7 +8,10 @@ from typing import Optional
 
 from terraria_agent.cerebellum.damage_detector import DamageDetector
 from terraria_agent.geometry import player_center_world, world_distance_tiles
-from terraria_agent.models.game_state import Camera, Enemy, EnemyThreat, GameState, InventorySlot, Player, TownNpc
+from terraria_agent.models.game_state import (
+    Camera, Enemy, EnemyThreat, GameState, InventorySlot, Player,
+    TileRun, TileWindow, TownNpc, WorldObject,
+)
 
 
 _DEFAULT_URL = "http://127.0.0.1:17878/state"
@@ -21,6 +24,10 @@ _THREAT_OVERRIDES: dict[int, EnemyThreat] = {
 }
 
 
+_NO_PROXY_HANDLER = urllib.request.ProxyHandler({})
+_OPENER = urllib.request.build_opener(_NO_PROXY_HANDLER)
+
+
 class TerraBlindClient:
     def __init__(self, url: str = _DEFAULT_URL, timeout: float = _TIMEOUT_SEC) -> None:
         self._url = url
@@ -31,7 +38,7 @@ class TerraBlindClient:
 
     def detect(self, frame) -> GameState:
         try:
-            with urllib.request.urlopen(self._url, timeout=self._timeout) as resp:
+            with _OPENER.open(self._url, timeout=self._timeout) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.URLError as e:
             self._note_error(f"urlerror:{type(e.reason).__name__}")
@@ -186,6 +193,36 @@ class TerraBlindClient:
                 homeless=bool(n.get("homeless", False)),
             ))
 
+        tile_window = None
+        tiles_raw = payload.get("tiles")
+        if tiles_raw and isinstance(tiles_raw, dict):
+            origin = tiles_raw.get("origin") or {}
+            rows_raw = tiles_raw.get("rows") or []
+            rows = [
+                [TileRun(type=r[0], sflags=r[1], count=r[2]) for r in row if isinstance(r, list) and len(r) >= 3]
+                for row in rows_raw if isinstance(row, list)
+            ]
+            tile_window = TileWindow(
+                origin=(int(origin.get("x", 0)), int(origin.get("y", 0))),
+                width=int(tiles_raw.get("w", 120)),
+                height=int(tiles_raw.get("h", 80)),
+                rows=rows,
+            )
+
+        objects: list[WorldObject] = []
+        for o in payload.get("objects") or []:
+            if not isinstance(o, dict):
+                continue
+            opos = o.get("pos") or {}
+            wpos = (float(opos.get("x", 0.0)), float(opos.get("y", 0.0)))
+            dist = world_distance_tiles(pcenter, wpos)
+            objects.append(WorldObject(
+                type=str(o.get("name", "")),
+                pos=wpos,
+                tile_pos=(int(o.get("tx", 0)), int(o.get("ty", 0))),
+                distance=dist,
+            ))
+
         return GameState(
             player=player,
             camera=camera,
@@ -195,6 +232,8 @@ class TerraBlindClient:
             equipped=equipped,
             inventory=inventory,
             inventory_slots=inventory_slots,
+            tile_window=tile_window,
+            objects=objects,
         )
 
     def _empty_state(self) -> GameState:
