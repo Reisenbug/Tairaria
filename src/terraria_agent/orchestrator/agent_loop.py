@@ -131,7 +131,7 @@ class AgentOrchestrator:
             game_state=game_state,
             task_queue=self._task_queue,
             dt=self._interval,
-            smart_cursor=self._smart_cursor,
+            smart_cursor=game_state.smart_cursor,
         )
         oneshot = self._oneshot
         self._oneshot = None
@@ -148,8 +148,6 @@ class AgentOrchestrator:
             except Exception:
                 self._bridge.log(f"[bt] tick error: {traceback.format_exc(limit=2)}")
                 return
-
-        self._smart_cursor = ctx.smart_cursor
 
         try:
             self._hand.execute(ctx.action_buffer)

@@ -234,6 +234,7 @@ class TerraBlindClient:
             inventory_slots=inventory_slots,
             tile_window=tile_window,
             objects=objects,
+            smart_cursor=bool(eq.get("smart_cursor", False)),
         )
 
     def _empty_state(self) -> GameState:
