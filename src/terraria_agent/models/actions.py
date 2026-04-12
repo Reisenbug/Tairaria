@@ -16,6 +16,7 @@ class ActionType(str, Enum):
     INTERACT = "interact"
     CRAFT = "craft"
     PICK_UP = "pick_up"
+    KEY_PRESS = "key_press"
     NONE = "none"
 
 

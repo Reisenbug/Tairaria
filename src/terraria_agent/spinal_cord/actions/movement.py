@@ -73,16 +73,17 @@ class MineForward(Action):
 
 
 class MoveToObject(Action):
-    def __init__(self, object_type: str, name: str = ""):
+    def __init__(self, object_type: str, reach_tiles: float = 4.0, name: str = ""):
         super().__init__(name)
         self.object_type = object_type
+        self.reach_tiles = reach_tiles
 
     def execute(self, ctx: TickContext) -> Status:
         targets = [o for o in ctx.game_state.objects if o.type == self.object_type]
         if not targets:
             return Status.FAILURE
         nearest = min(targets, key=lambda o: o.distance)
-        if nearest.distance < 10.0:
+        if nearest.distance <= self.reach_tiles:
             return Status.SUCCESS
         player_x = ctx.game_state.player.pos[0]
         direction = "right" if nearest.pos[0] > player_x else "left"
