@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -11,6 +13,13 @@ from terraria_agent.hand.key_state import KeyState
 
 pyautogui.PAUSE = 0.0
 pyautogui.FAILSAFE = False
+
+
+def _activate_terraria() -> None:
+    subprocess.run(
+        ["osascript", "-e", 'tell application "System Events" to set frontmost of process "Terraria" to true'],
+        capture_output=True, timeout=1,
+    )
 
 MOUSE_BUTTONS = {"mouse1": "left", "mouse2": "right", "mouse3": "middle", "mouse4": "x1", "mouse5": "x2"}
 
@@ -62,6 +71,9 @@ class HandController:
 
     def execute(self, actions: list[GameAction]) -> None:
         desired_holds: set[str] = set()
+
+        if actions:
+            _activate_terraria()
 
         for action in actions:
             self._dispatch(action, desired_holds)
@@ -117,7 +129,10 @@ class HandController:
     def _handle_jump(self) -> None:
         key = self.keymap.get_gameplay_key("jump")
         if key:
-            self.backend.press(key)
+            self.backend.key_down(key)
+            import time
+            time.sleep(0.5)
+            self.backend.key_up(key)
 
     def _handle_attack(self, action: GameAction, desired_holds: set[str]) -> None:
         if action.target and self._screen_safe(action.target) and self._mouse_enabled():
