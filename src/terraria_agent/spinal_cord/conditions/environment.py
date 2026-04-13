@@ -34,10 +34,10 @@ class CanJumpOverObstacle(Condition):
         scan = ctx.game_state.terrain_scan
         if scan is None:
             return False
-        mv = ctx.game_state.movement
         if scan.terrain_type == TerrainType.BLOCK_WALL:
-            from terraria_agent.cerebellum.terra_blind_client import _base_jump_height
-            return scan.depth_or_height <= _base_jump_height(mv)
+            mv = ctx.game_state.movement
+            peak = mv.jump_speed ** 2 / (2.0 * max(mv.gravity, 0.01)) / 16.0
+            return scan.depth_or_height <= peak
         return False
 
 

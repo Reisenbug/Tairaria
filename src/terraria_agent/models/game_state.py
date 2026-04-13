@@ -180,6 +180,10 @@ class TileRun(BaseModel):
     def shimmer(self) -> bool:
         return bool(self.sflags & 32)
 
+    @property
+    def platform(self) -> bool:
+        return bool(self.sflags & 64)
+
 
 class TileWindow(BaseModel):
     origin: tuple[int, int] = (0, 0)

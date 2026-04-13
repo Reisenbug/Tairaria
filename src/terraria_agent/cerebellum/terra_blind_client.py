@@ -37,7 +37,14 @@ _SCAN_COLUMNS = 10
 
 def _is_solid_at(tw: TileWindow, tx: int, ty: int) -> bool:
     t = tw.tile_at(tx, ty)
-    return t is not None and t.solid
+    return t is not None and t.solid and not t.platform
+
+
+def _is_standable_at(tw: TileWindow, tx: int, ty: int) -> bool:
+    t = tw.tile_at(tx, ty)
+    if t is None:
+        return False
+    return t.solid
 
 
 def _is_liquid_at(tw: TileWindow, tx: int, ty: int) -> int:
@@ -51,20 +58,47 @@ def _is_liquid_at(tw: TileWindow, tx: int, ty: int) -> int:
     return 0
 
 
-def _base_jump_height(movement: MovementInfo) -> float:
-    base = 7.0
-    if movement.extra_jumps > 0:
-        base += 4.0 * movement.extra_jumps
-    if movement.wing_time_max > 0:
-        base += movement.wing_time_max * 0.5
-    return base
+_TILE_PX = 16.0
+
+
+def _jump_envelope(movement: MovementInfo, max_cols: int = 30) -> list[int]:
+    h_speed = max(movement.max_run_speed, movement.acc_run_speed)
+    if h_speed < 0.01:
+        return [0] * max_cols
+    js = movement.jump_speed
+    grav = movement.gravity
+    peak_t = js / max(grav, 0.01)
+    peak_col = int(h_speed * peak_t / _TILE_PX)
+
+    envelope = []
+    for col in range(max_cols):
+        if col <= peak_col:
+            dy = 0
+        else:
+            fall_t = (col - peak_col) * _TILE_PX / h_speed
+            dy = int(0.5 * grav * fall_t * fall_t / _TILE_PX)
+        envelope.append(dy)
+    return envelope
+
+
+def _can_jump_over_pit(tw: TileWindow, pit_start_x: int, feet_y: int, sign: int,
+                       movement: MovementInfo) -> bool:
+    envelope = _jump_envelope(movement)
+    for col, dy in enumerate(envelope):
+        cx = pit_start_x + sign * col
+        env_y = feet_y + dy
+        for check_y in range(env_y, env_y + 10):
+            if _is_standable_at(tw, cx, check_y):
+                if check_y > feet_y + 2 and col == 0:
+                    break
+                return True
+    return False
 
 
 def _scan_terrain(tw: TileWindow, player: Player, movement: MovementInfo) -> TerrainScan:
     pcx = int((player.pos[0] + player.width / 2.0) / 16.0)
     feet_y = int((player.pos[1] + player.height) / 16.0)
     head_y = feet_y - _PLAYER_H_TILES
-    jumpable = _base_jump_height(movement)
 
     sign = 1 if player.direction == "right" else -1
     start_x = pcx + sign * (_PLAYER_W_TILES // 2 + 1)
@@ -89,16 +123,23 @@ def _scan_terrain(tw: TileWindow, player: Player, movement: MovementInfo) -> Ter
                     break
             return TerrainScan(terrain_type=TerrainType.BLOCK_WALL, distance_tiles=dist, depth_or_height=wall_h)
 
-        pit_depth = 0
-        found_ground = False
-        for dy in range(0, 40):
-            if _is_solid_at(tw, cx, feet_y + dy):
-                found_ground = True
-                pit_depth = dy
+        has_ground = False
+        for dy in range(3):
+            if _is_standable_at(tw, cx, feet_y + dy):
+                has_ground = True
                 break
-            pit_depth = dy + 1
 
-        if not found_ground or pit_depth > jumpable:
+        if not has_ground:
+            pit_depth = 0
+            for dy in range(40):
+                if _is_standable_at(tw, cx, feet_y + dy):
+                    pit_depth = dy
+                    break
+                pit_depth = dy + 1
+
+            jumpable = _can_jump_over_pit(tw, cx, feet_y, sign, movement)
+            if jumpable:
+                return TerrainScan(terrain_type=TerrainType.FLAT, distance_tiles=dist, depth_or_height=pit_depth)
             return TerrainScan(terrain_type=TerrainType.PIT, distance_tiles=dist, depth_or_height=pit_depth)
 
     return TerrainScan(terrain_type=TerrainType.FLAT, distance_tiles=_SCAN_COLUMNS, depth_or_height=0)
