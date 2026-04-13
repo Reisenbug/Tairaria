@@ -46,6 +46,17 @@ class PlacePlatform(Action):
         return Status.SUCCESS
 
 
+class Swim(Action):
+    def __init__(self, direction: str = "right", name: str = ""):
+        super().__init__(name)
+        self.direction = direction
+
+    def execute(self, ctx: TickContext) -> Status:
+        ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction=self.direction))
+        ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
+        return Status.SUCCESS
+
+
 class MineForward(Action):
     def __init__(self, dx_tiles: float = 1.0, dy_tiles: float = 0.0, name: str = ""):
         super().__init__(name)
