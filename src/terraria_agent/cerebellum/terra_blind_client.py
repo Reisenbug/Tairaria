@@ -59,6 +59,17 @@ def _is_liquid_at(tw: TileWindow, tx: int, ty: int) -> int:
 
 
 _TILE_PX = 16.0
+_DEFAULT_JUMP_HEIGHT = 15
+
+
+def _jump_peak_tiles(movement: MovementInfo) -> float:
+    js = movement.jump_speed
+    grav = max(movement.gravity, 0.01)
+    hold_frames = _DEFAULT_JUMP_HEIGHT + 1
+    hold_speed = js - grav
+    phase1 = hold_speed * hold_frames
+    phase2 = hold_speed * hold_speed / (2.0 * grav)
+    return (phase1 + phase2) / _TILE_PX
 
 
 def _jump_envelope(movement: MovementInfo, max_cols: int = 30) -> list[int]:
@@ -66,17 +77,28 @@ def _jump_envelope(movement: MovementInfo, max_cols: int = 30) -> list[int]:
     if h_speed < 0.01:
         return [0] * max_cols
     js = movement.jump_speed
-    grav = movement.gravity
-    peak_t = js / max(grav, 0.01)
-    peak_col = int(h_speed * peak_t / _TILE_PX)
+    grav = max(movement.gravity, 0.01)
+    hold_frames = _DEFAULT_JUMP_HEIGHT + 1
+    hold_speed = js - grav
+
+    phase1_ticks = hold_frames
+    phase2_ticks = hold_speed / grav
+    peak_t = phase1_ticks + phase2_ticks
+    peak_rise_px = hold_speed * phase1_ticks + hold_speed * phase2_ticks - 0.5 * grav * phase2_ticks * phase2_ticks
 
     envelope = []
     for col in range(max_cols):
-        if col <= peak_col:
-            dy = 0
+        t = col * _TILE_PX / h_speed
+        if t <= phase1_ticks:
+            rise_px = hold_speed * t
+        elif t <= peak_t:
+            dt = t - phase1_ticks
+            rise_px = hold_speed * phase1_ticks + hold_speed * dt - 0.5 * grav * dt * dt
         else:
-            fall_t = (col - peak_col) * _TILE_PX / h_speed
-            dy = int(0.5 * grav * fall_t * fall_t / _TILE_PX)
+            dt = t - peak_t
+            rise_px = peak_rise_px - 0.5 * grav * dt * dt
+
+        dy = int(-rise_px / _TILE_PX)
         envelope.append(dy)
     return envelope
 
