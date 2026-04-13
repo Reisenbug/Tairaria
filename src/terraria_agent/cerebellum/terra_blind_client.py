@@ -10,7 +10,8 @@ from terraria_agent.cerebellum.damage_detector import DamageDetector
 from terraria_agent.geometry import player_center_world, world_distance_tiles
 from terraria_agent.models.game_state import (
     Camera, DroppedItem, Enemy, EnemyThreat, GameState, InventorySlot,
-    Player, TileRun, TileWindow, TownNpc, WorldObject,
+    MovementInfo, Player, TerrainScan, TerrainType, TileRun, TileWindow,
+    TownNpc, WorldObject,
 )
 
 
@@ -27,6 +28,80 @@ _THREAT_OVERRIDES: dict[int, EnemyThreat] = {
 
 _NO_PROXY_HANDLER = urllib.request.ProxyHandler({})
 _OPENER = urllib.request.build_opener(_NO_PROXY_HANDLER)
+
+
+_PLAYER_W_TILES = 2
+_PLAYER_H_TILES = 3
+_SCAN_COLUMNS = 10
+
+
+def _is_solid_at(tw: TileWindow, tx: int, ty: int) -> bool:
+    t = tw.tile_at(tx, ty)
+    return t is not None and t.solid
+
+
+def _is_liquid_at(tw: TileWindow, tx: int, ty: int) -> int:
+    t = tw.tile_at(tx, ty)
+    if t is None:
+        return 0
+    if t.lava:
+        return 2
+    if t.water:
+        return 1
+    return 0
+
+
+def _base_jump_height(movement: MovementInfo) -> float:
+    base = 7.0
+    if movement.extra_jumps > 0:
+        base += 4.0 * movement.extra_jumps
+    if movement.wing_time_max > 0:
+        base += movement.wing_time_max * 0.5
+    return base
+
+
+def _scan_terrain(tw: TileWindow, player: Player, movement: MovementInfo) -> TerrainScan:
+    pcx = int((player.pos[0] + player.width / 2.0) / 16.0)
+    feet_y = int((player.pos[1] + player.height) / 16.0)
+    head_y = feet_y - _PLAYER_H_TILES
+    jumpable = _base_jump_height(movement)
+
+    sign = 1 if player.direction == "right" else -1
+    start_x = pcx + sign * (_PLAYER_W_TILES // 2 + 1)
+
+    for col_offset in range(_SCAN_COLUMNS):
+        cx = start_x + sign * col_offset
+        dist = col_offset + 1
+
+        liquid = _is_liquid_at(tw, cx, feet_y)
+        if liquid == 2:
+            return TerrainScan(terrain_type=TerrainType.LAVA, distance_tiles=dist, depth_or_height=0)
+        if liquid == 1:
+            return TerrainScan(terrain_type=TerrainType.WATER, distance_tiles=dist, depth_or_height=0)
+
+        body_blocked = any(_is_solid_at(tw, cx, y) for y in range(head_y, feet_y))
+        if body_blocked:
+            wall_h = 0
+            for check_y in range(feet_y - 1, feet_y - 12, -1):
+                if _is_solid_at(tw, cx, check_y):
+                    wall_h += 1
+                else:
+                    break
+            return TerrainScan(terrain_type=TerrainType.BLOCK_WALL, distance_tiles=dist, depth_or_height=wall_h)
+
+        pit_depth = 0
+        found_ground = False
+        for dy in range(0, 40):
+            if _is_solid_at(tw, cx, feet_y + dy):
+                found_ground = True
+                pit_depth = dy
+                break
+            pit_depth = dy + 1
+
+        if not found_ground or pit_depth > jumpable:
+            return TerrainScan(terrain_type=TerrainType.PIT, distance_tiles=dist, depth_or_height=pit_depth)
+
+    return TerrainScan(terrain_type=TerrainType.FLAT, distance_tiles=_SCAN_COLUMNS, depth_or_height=0)
 
 
 class TerraBlindClient:
@@ -240,6 +315,25 @@ class TerraBlindClient:
                 distance=dist,
             ))
 
+        mv_raw = payload.get("movement") or {}
+        movement = MovementInfo(
+            jump_speed=float(mv_raw.get("jump_speed", 5.01)),
+            gravity=float(mv_raw.get("gravity", 0.4)),
+            max_run_speed=float(mv_raw.get("max_run_speed", 3.0)),
+            acc_run_speed=float(mv_raw.get("acc_run_speed", 0.0)),
+            wing_time_max=int(mv_raw.get("wing_time_max", 0)),
+            no_fall_dmg=bool(mv_raw.get("no_fall_dmg", False)),
+            lava_immune=bool(mv_raw.get("lava_immune", False)),
+            lava_time=int(mv_raw.get("lava_time", 0)),
+            extra_jumps=int(mv_raw.get("extra_jumps", 0)),
+        )
+
+        terrain_ahead = TerrainType.FLAT
+        terrain_scan = None
+        if tile_window and tile_window.rows:
+            terrain_scan = _scan_terrain(tile_window, player, movement)
+            terrain_ahead = terrain_scan.terrain_type
+
         return GameState(
             player=player,
             camera=camera,
@@ -252,6 +346,9 @@ class TerraBlindClient:
             tile_window=tile_window,
             objects=objects,
             dropped_items=dropped_items,
+            movement=movement,
+            terrain_ahead=terrain_ahead,
+            terrain_scan=terrain_scan,
             chest_open=bool(eq.get("chest_open", False)),
             smart_cursor=bool(eq.get("smart_cursor", False)),
         )

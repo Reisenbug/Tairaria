@@ -19,6 +19,28 @@ class IsBlockWallAhead(Condition):
         return ctx.game_state.terrain_ahead == TerrainType.BLOCK_WALL
 
 
+class IsWaterAhead(Condition):
+    def check(self, ctx: TickContext) -> bool:
+        return ctx.game_state.terrain_ahead == TerrainType.WATER
+
+
+class IsLavaAhead(Condition):
+    def check(self, ctx: TickContext) -> bool:
+        return ctx.game_state.terrain_ahead == TerrainType.LAVA
+
+
+class CanJumpOverObstacle(Condition):
+    def check(self, ctx: TickContext) -> bool:
+        scan = ctx.game_state.terrain_scan
+        if scan is None:
+            return False
+        mv = ctx.game_state.movement
+        if scan.terrain_type == TerrainType.BLOCK_WALL:
+            from terraria_agent.cerebellum.terra_blind_client import _base_jump_height
+            return scan.depth_or_height <= _base_jump_height(mv)
+        return False
+
+
 class IsDark(Condition):
     def check(self, ctx: TickContext) -> bool:
         return ctx.game_state.is_dark

@@ -22,6 +22,41 @@ class TerrainType(str, Enum):
     LAVA = "lava"
 
 
+class MovementInfo(BaseModel):
+    jump_speed: float = 5.01
+    gravity: float = 0.4
+    max_run_speed: float = 3.0
+    acc_run_speed: float = 0.0
+    wing_time_max: int = 0
+    no_fall_dmg: bool = False
+    lava_immune: bool = False
+    lava_time: int = 0
+    extra_jumps: int = 0
+
+    @property
+    def jump_height_tiles(self) -> float:
+        return (self.jump_speed ** 2) / (2.0 * max(self.gravity, 0.01)) / 16.0
+
+    @property
+    def horizontal_speed(self) -> float:
+        return max(self.max_run_speed, self.acc_run_speed)
+
+    @property
+    def jump_duration_ticks(self) -> float:
+        return self.jump_speed / max(self.gravity, 0.01)
+
+    @property
+    def jump_range_tiles(self) -> float:
+        air_time = 2.0 * self.jump_duration_ticks / 60.0
+        return self.horizontal_speed * air_time * 60.0 / 16.0
+
+
+class TerrainScan(BaseModel):
+    terrain_type: TerrainType = TerrainType.FLAT
+    distance_tiles: int = 0
+    depth_or_height: int = 0
+
+
 class InventorySlot(BaseModel):
     slot_index: int
     id: int = 0
@@ -190,8 +225,10 @@ class GameState(BaseModel):
     tile_window: Optional[TileWindow] = None
     objects: list[WorldObject] = []
     dropped_items: list[DroppedItem] = []
+    movement: MovementInfo = MovementInfo()
     terrain_ahead: TerrainType = TerrainType.FLAT
     terrain_behind: TerrainType = TerrainType.FLAT
+    terrain_scan: Optional[TerrainScan] = None
     equipped: str = "none"
     hotbar: list[Optional[str]] = [None] * 10
     inventory: dict[str, int] = {}
