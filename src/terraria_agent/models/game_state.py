@@ -24,6 +24,7 @@ class TerrainType(str, Enum):
 
 class MovementInfo(BaseModel):
     jump_speed: float = 5.01
+    jump_height: int = 15
     gravity: float = 0.4
     max_run_speed: float = 3.0
     acc_run_speed: float = 0.0
@@ -32,23 +33,6 @@ class MovementInfo(BaseModel):
     lava_immune: bool = False
     lava_time: int = 0
     extra_jumps: int = 0
-
-    @property
-    def jump_height_tiles(self) -> float:
-        return (self.jump_speed ** 2) / (2.0 * max(self.gravity, 0.01)) / 16.0
-
-    @property
-    def horizontal_speed(self) -> float:
-        return max(self.max_run_speed, self.acc_run_speed)
-
-    @property
-    def jump_duration_ticks(self) -> float:
-        return self.jump_speed / max(self.gravity, 0.01)
-
-    @property
-    def jump_range_tiles(self) -> float:
-        air_time = 2.0 * self.jump_duration_ticks / 60.0
-        return self.horizontal_speed * air_time * 60.0 / 16.0
 
 
 class TerrainScan(BaseModel):

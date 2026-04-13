@@ -59,13 +59,12 @@ def _is_liquid_at(tw: TileWindow, tx: int, ty: int) -> int:
 
 
 _TILE_PX = 16.0
-_DEFAULT_JUMP_HEIGHT = 15
 
 
 def _jump_peak_tiles(movement: MovementInfo) -> float:
     js = movement.jump_speed
     grav = max(movement.gravity, 0.01)
-    hold_frames = _DEFAULT_JUMP_HEIGHT + 1
+    hold_frames = movement.jump_height + 1
     hold_speed = js - grav
     phase1 = hold_speed * hold_frames
     phase2 = hold_speed * hold_speed / (2.0 * grav)
@@ -78,7 +77,7 @@ def _jump_envelope(movement: MovementInfo, max_cols: int = 30) -> list[int]:
         return [0] * max_cols
     js = movement.jump_speed
     grav = max(movement.gravity, 0.01)
-    hold_frames = _DEFAULT_JUMP_HEIGHT + 1
+    hold_frames = movement.jump_height + 1
     hold_speed = js - grav
 
     phase1_ticks = hold_frames
@@ -381,6 +380,7 @@ class TerraBlindClient:
         mv_raw = payload.get("movement") or {}
         movement = MovementInfo(
             jump_speed=float(mv_raw.get("jump_speed", 5.01)),
+            jump_height=int(mv_raw.get("jump_height", 15)),
             gravity=float(mv_raw.get("gravity", 0.4)),
             max_run_speed=float(mv_raw.get("max_run_speed", 3.0)),
             acc_run_speed=float(mv_raw.get("acc_run_speed", 0.0)),
