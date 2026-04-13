@@ -47,12 +47,9 @@ class PlacePlatform(Action):
 
 
 class Swim(Action):
-    def __init__(self, direction: str = "right", name: str = ""):
-        super().__init__(name)
-        self.direction = direction
-
     def execute(self, ctx: TickContext) -> Status:
-        ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction=self.direction))
+        direction = ctx.game_state.player.direction
+        ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction=direction))
         ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
         return Status.SUCCESS
 

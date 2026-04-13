@@ -3,20 +3,15 @@ from terraria_agent.spinal_cord.conditions.environment import (
     IsPitAhead, IsBlockWallAhead, IsWaterAhead, IsDark, CanJumpOverObstacle,
 )
 from terraria_agent.spinal_cord.conditions.inventory import HasPlatforms, HasTorch, HasPickaxe
-from terraria_agent.spinal_cord.actions.movement import (
-    Jump, PlacePlatform, MineForward, MoveRight, Swim,
-)
+from terraria_agent.spinal_cord.actions.movement import Jump, PlacePlatform, MineForward, Swim
 from terraria_agent.spinal_cord.actions.survival import PlaceTorch
 
 
 def build_terrain_tree():
     """
-    TERRAIN [Selector] — handle obstacles while moving right
-    ├── PIT: jump over, or bridge with platforms
-    ├── BLOCK_WALL: jump if low enough, else mine through
-    ├── WATER: swim through (move right + periodic jump)
-    ├── DARK: place torch
-    └── GO_RIGHT: default movement
+    TERRAIN [Selector] — handle obstacles in current movement direction.
+    Movement direction is decided by tasks, not here.
+    Only activates when terrain_ahead != FLAT.
     """
     return Selector(
         children=[
@@ -42,14 +37,13 @@ def build_terrain_tree():
                 name="BlockWallHandling",
             ),
             Sequence(
-                children=[IsWaterAhead(), Swim("right")],
+                children=[IsWaterAhead(), Swim()],
                 name="WaterHandling",
             ),
             Sequence(
                 children=[IsDark(), HasTorch(), PlaceTorch()],
                 name="DarkHandling",
             ),
-            MoveRight(name="GoRight"),
         ],
         name="Terrain",
     )
