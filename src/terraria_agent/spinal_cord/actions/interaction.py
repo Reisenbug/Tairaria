@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from terraria_agent.geometry import world_to_screen
+from terraria_agent.geometry import tile_offset_world, world_to_screen
 from terraria_agent.models.actions import GameAction, ActionType
 from terraria_agent.spinal_cord.bt.core import Status
 from terraria_agent.spinal_cord.bt.leaves import Action
@@ -12,19 +12,69 @@ if TYPE_CHECKING:
 
 VALUABLE_DROPS = {"fruit", "gold_coin", "pet"}
 
+_AXE_SLOT = 2
+_big_trees_chopped = 0
+_BIG_TREE_LIMIT = 2
+_BIG_TREE_HEIGHT = 16
 
-class ChopTree(Action):
+
+def _tree_height(ctx: TickContext, tree_obj) -> int:
+    tw = ctx.game_state.tile_window
+    if tw is None:
+        return 0
+    tx, ty = tree_obj.tile_pos
+    height = 0
+    for dy in range(0, 40):
+        t = tw.tile_at(tx, ty - dy)
+        if t is not None and t.active and not t.solid:
+            height += 1
+        elif height > 0:
+            break
+    return height
+
+
+def _ensure_axe(ctx: TickContext) -> None:
+    if ctx.game_state.player.selected_slot != _AXE_SLOT:
+        ctx.action_buffer.append(GameAction(action=ActionType.SWITCH_SLOT, slot=_AXE_SLOT))
+
+
+class ShakeTree(Action):
     def execute(self, ctx: TickContext) -> Status:
-        trees = [o for o in ctx.game_state.objects if o.type == "tree"]
-        if not trees:
+        _ensure_axe(ctx)
+        if not ctx.game_state.smart_cursor:
+            ctx.action_buffer.append(GameAction(action=ActionType.KEY_PRESS, item="smart_cursor"))
+        facing = ctx.game_state.player.direction
+        sign = 1.0 if facing == "right" else -1.0
+        target = tile_offset_world(ctx.game_state.player, sign * 2.0, 0.0)
+        screen_xy = world_to_screen(target, ctx.game_state.camera)
+        ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
+        return Status.SUCCESS
+
+
+class ChopBigTree(Action):
+    def execute(self, ctx: TickContext) -> Status:
+        global _big_trees_chopped
+        if _big_trees_chopped >= _BIG_TREE_LIMIT:
             return Status.FAILURE
-        for i, item in enumerate(ctx.game_state.hotbar):
-            if item and "axe" in item:
-                ctx.action_buffer.append(GameAction(action=ActionType.SWITCH_SLOT, slot=i))
-                break
-        nearest = min(trees, key=lambda o: o.distance)
+        trees = [o for o in ctx.game_state.objects if o.type == "tree"]
+        big_trees = [t for t in trees if _tree_height(ctx, t) >= _BIG_TREE_HEIGHT]
+        if not big_trees:
+            return Status.FAILURE
+        nearest = min(big_trees, key=lambda o: o.distance)
+        if nearest.distance > 4.0:
+            return Status.FAILURE
+        _ensure_axe(ctx)
         screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
         ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
+        ctx.bt_trace.append(f"ChopBig({_big_trees_chopped}/{_BIG_TREE_LIMIT})")
+        return Status.RUNNING
+
+
+class BigTreeChopped(Action):
+    def execute(self, ctx: TickContext) -> Status:
+        global _big_trees_chopped
+        _big_trees_chopped += 1
+        ctx.bt_trace.append(f"BigTreeDone({_big_trees_chopped}/{_BIG_TREE_LIMIT})")
         return Status.SUCCESS
 
 

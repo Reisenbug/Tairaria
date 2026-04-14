@@ -77,7 +77,7 @@ def main() -> None:
     orch._task_queue = TaskQueue(
         goal="go jungle, collect loot",
         task_queue=[
-            Task(trigger="tree_nearby", action="chop_tree", priority=TaskPriority.LOW),
+            Task(trigger="big_tree_nearby", action="chop_big_tree", priority=TaskPriority.HIGH),
             Task(trigger="chest_nearby", action="loot_chest", priority=TaskPriority.LOW),
             Task(trigger="default", action="move_right", priority=TaskPriority.BASELINE),
         ],
