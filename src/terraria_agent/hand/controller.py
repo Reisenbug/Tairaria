@@ -119,7 +119,7 @@ class HandController:
             case ActionType.MOVE:
                 self._handle_move(action, desired_holds)
             case ActionType.JUMP:
-                self._handle_jump()
+                self._handle_jump(desired_holds)
             case ActionType.ATTACK:
                 self._handle_attack(action, desired_holds)
             case ActionType.SWITCH_SLOT:
@@ -151,13 +151,12 @@ class HandController:
         if self.key_state.press(key):
             self.backend.key_down(key)
 
-    def _handle_jump(self) -> None:
+    def _handle_jump(self, desired_holds: set[str]) -> None:
         key = self.keymap.get_gameplay_key("jump")
         if key:
-            self.backend.key_down(key)
-            import time
-            time.sleep(0.5)
-            self.backend.key_up(key)
+            desired_holds.add(key)
+            if self.key_state.press(key):
+                self.backend.key_down(key)
 
     def _handle_attack(self, action: GameAction, desired_holds: set[str]) -> None:
         if action.target and self._screen_safe(action.target) and self._mouse_enabled():
