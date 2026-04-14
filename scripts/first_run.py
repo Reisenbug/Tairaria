@@ -76,6 +76,7 @@ def main() -> None:
     orch = AgentOrchestrator(bridge, tick_rate=5.0, detector=detector)
     orch._task_queue = TaskQueue(
         goal="go jungle, collect loot",
+        stop_biome="jungle",
         task_queue=[
             Task(trigger="big_tree_nearby", action="chop_big_tree", priority=TaskPriority.HIGH),
             Task(trigger="chest_nearby", action="loot_chest", priority=TaskPriority.LOW),

@@ -24,3 +24,5 @@ class TaskQueue(BaseModel):
     goal: str
     task_queue: list[Task]
     timestamp: float = 0.0
+    stop_biome: str | None = None
+    goal_achieved: bool = False

@@ -128,6 +128,18 @@ class AgentOrchestrator:
         frame = self._capture.capture()
         game_state = self._detector.detect(frame)
 
+        tq = self._task_queue
+        if (
+            not tq.goal_achieved
+            and tq.stop_biome is not None
+            and game_state.biome == tq.stop_biome
+        ):
+            tq.goal_achieved = True
+            self._bridge.log(f"[goal] reached biome={tq.stop_biome} — pausing")
+            self._bridge.set_paused(True)
+            self._publish(game_state, [], "goal_achieved", f"biome={tq.stop_biome}")
+            return
+
         ctx = TickContext(
             game_state=game_state,
             task_queue=self._task_queue,
