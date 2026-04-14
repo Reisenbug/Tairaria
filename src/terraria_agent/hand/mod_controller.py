@@ -26,6 +26,7 @@ class ModController:
 
     def execute(self, actions: list[GameAction]) -> None:
         ctrl: dict = {}
+        need_mouse_down = False
         for a in actions:
             match a.action:
                 case ActionType.MOVE:
@@ -34,20 +35,23 @@ class ModController:
                 case ActionType.JUMP:
                     ctrl["jump"] = True
                 case ActionType.ATTACK:
-                    ctrl["use_item"] = True
+                    need_mouse_down = True
                     if a.target and self._mouse_enabled():
                         pyautogui.moveTo(int(a.target[0]), int(a.target[1]))
                 case ActionType.USE_ITEM:
-                    ctrl["use_item"] = True
+                    need_mouse_down = True
                     if a.slot is not None:
                         ctrl["selected_slot"] = a.slot
                 case ActionType.SWITCH_SLOT:
                     if a.slot is not None:
                         ctrl["selected_slot"] = a.slot
                 case ActionType.PLACE_BLOCK:
-                    ctrl["use_item"] = True
+                    need_mouse_down = True
                 case ActionType.INTERACT:
-                    ctrl["right"] = ctrl.get("right", False)
+                    if self._mouse_enabled():
+                        if a.target:
+                            pyautogui.moveTo(int(a.target[0]), int(a.target[1]))
+                        pyautogui.click(button="right")
                 case ActionType.KEY_PRESS:
                     if a.item == "smart_cursor":
                         ctrl["smart_cursor"] = True
@@ -58,11 +62,25 @@ class ModController:
                 case ActionType.PICK_UP | ActionType.CRAFT | ActionType.NONE:
                     pass
 
+        if need_mouse_down:
+            if self._mouse_enabled():
+                if not self.key_state.press("mouse:left"):
+                    pass
+                pyautogui.mouseDown(button="left")
+                self._holding_mouse = True
+        elif getattr(self, "_holding_mouse", False):
+            pyautogui.mouseUp(button="left")
+            self.key_state.release("mouse:left")
+            self._holding_mouse = False
+
         if ctrl:
             self._post_control(ctrl)
 
     def release_all(self) -> None:
         self._post_control({})
+        if getattr(self, "_holding_mouse", False):
+            pyautogui.mouseUp(button="left")
+            self._holding_mouse = False
 
     def _post_control(self, ctrl: dict) -> None:
         try:
