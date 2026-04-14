@@ -16,7 +16,6 @@ _AXE_SLOT = 2
 _big_trees_chopped = 0
 _BIG_TREE_LIMIT = 2
 _BIG_TREE_HEIGHT = 16
-is_chopping = False
 
 
 def _tree_height(ctx: TickContext, tree_obj) -> int:
@@ -54,20 +53,16 @@ class ShakeTree(Action):
 
 class ChopBigTree(Action):
     def execute(self, ctx: TickContext) -> Status:
-        global _big_trees_chopped, is_chopping
+        global _big_trees_chopped
         if _big_trees_chopped >= _BIG_TREE_LIMIT:
-            is_chopping = False
             return Status.FAILURE
         trees = [o for o in ctx.game_state.objects if o.type == "tree"]
         big_trees = [t for t in trees if _tree_height(ctx, t) >= _BIG_TREE_HEIGHT]
         if not big_trees:
-            is_chopping = False
             return Status.FAILURE
         nearest = min(big_trees, key=lambda o: o.distance)
         if nearest.distance > 4.0:
-            is_chopping = False
             return Status.FAILURE
-        is_chopping = True
         _ensure_axe(ctx)
         screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
         ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
@@ -77,9 +72,8 @@ class ChopBigTree(Action):
 
 class BigTreeChopped(Action):
     def execute(self, ctx: TickContext) -> Status:
-        global _big_trees_chopped, is_chopping
+        global _big_trees_chopped
         _big_trees_chopped += 1
-        is_chopping = False
         ctx.bt_trace.append(f"BigTreeDone({_big_trees_chopped}/{_BIG_TREE_LIMIT})")
         return Status.SUCCESS
 

@@ -1,4 +1,5 @@
 from terraria_agent.spinal_cord.bt import Sequence, Selector
+from terraria_agent.spinal_cord.bt.leaves import Condition
 from terraria_agent.spinal_cord.conditions.environment import (
     IsPitAhead, IsBlockWallAhead, IsWaterAhead, IsDark, CanJumpOverObstacle,
 )
@@ -7,14 +8,21 @@ from terraria_agent.spinal_cord.actions.movement import Jump, PlacePlatform, Min
 from terraria_agent.spinal_cord.actions.survival import PlaceTorch
 
 
+class NotExclusive(Condition):
+    def check(self, ctx) -> bool:
+        return not ctx.exclusive_active
+
+
 def build_terrain_tree():
     """
-    TERRAIN [Selector] — handle obstacles in current movement direction.
+    TERRAIN [Sequence] — handle obstacles in current movement direction.
     Movement direction is decided by tasks, not here.
-    Only activates when terrain_ahead != FLAT.
+    Defers while an EXCLUSIVE task is pinned (chop big tree, open chest, etc.).
     """
-    return Selector(
+    return Sequence(
         children=[
+            NotExclusive(name="NotExclusive"),
+            Selector(children=[
             Sequence(
                 children=[
                     IsPitAhead(),
@@ -44,6 +52,7 @@ def build_terrain_tree():
                 children=[IsDark(), HasTorch(), PlaceTorch()],
                 name="DarkHandling",
             ),
+            ], name="TerrainBranches"),
         ],
         name="Terrain",
     )
