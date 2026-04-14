@@ -135,10 +135,7 @@ class AgentOrchestrator:
             and game_state.biome == tq.stop_biome
         ):
             tq.goal_achieved = True
-            self._bridge.log(f"[goal] reached biome={tq.stop_biome} — pausing")
-            self._bridge.set_paused(True)
-            self._publish(game_state, [], "goal_achieved", f"biome={tq.stop_biome}")
-            return
+            self._bridge.log(f"[goal] reached biome={tq.stop_biome} — continuing")
 
         ctx = TickContext(
             game_state=game_state,
