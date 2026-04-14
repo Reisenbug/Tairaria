@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Callable
 from terraria_agent.spinal_cord.bt import DynamicSelector, Sequence
 from terraria_agent.spinal_cord.bt.core import Node
 from terraria_agent.spinal_cord.bt.leaves import Condition
-from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveToObject
+from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveRight, MoveToObject
 from terraria_agent.spinal_cord.actions.interaction import ChopTree, PickUpValuableDrop, OpenChest, EnsureSmartCursorOn, LootAll
 from terraria_agent.spinal_cord.actions.crafting import CraftPlatforms
 
@@ -60,6 +60,8 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
             ],
             name="Task_craft_platforms",
         )
+    elif trigger == "default" and action == "move_right":
+        return MoveRight(name="Task_default_move_right")
     elif trigger == "default":
         return MoveLeft(name="Task_default_move_left")
     return None

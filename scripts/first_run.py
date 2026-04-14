@@ -1,13 +1,13 @@
 """
-First real run: starts the agent with a 'walk left' default task.
+Jungle journey: agent walks right toward jungle, collecting resources on the way.
 
 Usage:
     python scripts/first_run.py
 
 Flow:
     1. HUD window spawns
-    2. Auto-focuses Terraria (3s delay for you to switch desktops if needed)
-    3. Agent loop starts ticking — player walks left
+    2. Auto-focuses Terraria (3s delay)
+    3. Agent walks right, handles terrain, collects loot, fights enemies
 
 Controls:
     - Type 'pause' in the command box to stop movement
@@ -17,7 +17,6 @@ Controls:
 from __future__ import annotations
 
 import os
-import sys
 import time
 
 import dearpygui.dearpygui as dpg
@@ -76,15 +75,18 @@ def main() -> None:
 
     orch = AgentOrchestrator(bridge, tick_rate=5.0, detector=detector)
     orch._task_queue = TaskQueue(
-        goal="walk left",
+        goal="go jungle, collect loot",
         task_queue=[
-            Task(trigger="default", action="move_left", priority=TaskPriority.BASELINE),
+            Task(trigger="tree_nearby", action="chop_tree", priority=TaskPriority.LOW),
+            Task(trigger="chest_nearby", action="loot_chest", priority=TaskPriority.LOW),
+            Task(trigger="default", action="move_right", priority=TaskPriority.BASELINE),
         ],
     )
 
-    bridge.log("[first_run] HUD ready — focusing Terraria in 3s...")
-    bridge.log("[first_run] Player will walk left after focus switch")
-    bridge.log("[first_run] Type 'pause' in command box to stop")
+    bridge.log("[jungle] HUD ready — focusing Terraria in 3s...")
+    bridge.log("[jungle] Agent will walk RIGHT toward jungle")
+    bridge.log("[jungle] Collecting trees and chests on the way")
+    bridge.log("[jungle] Type 'pause' to stop")
 
     dpg.create_context()
     dpg.create_viewport(
@@ -122,6 +124,7 @@ def main() -> None:
     focus_done = False
     agent_started = False
     hud_start_time = time.monotonic()
+    jungle_reached = False
 
     try:
         while dpg.is_dearpygui_running():
@@ -130,7 +133,7 @@ def main() -> None:
 
             if not focus_done and elapsed >= FOCUS_DELAY:
                 _focus_terraria()
-                bridge.log("[first_run] Focused Terraria — starting agent")
+                bridge.log("[jungle] Focused Terraria — starting agent")
                 focus_done = True
 
             if focus_done and not agent_started:

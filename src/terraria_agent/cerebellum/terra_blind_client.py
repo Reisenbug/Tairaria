@@ -414,6 +414,7 @@ class TerraBlindClient:
             terrain_scan=terrain_scan,
             chest_open=bool(eq.get("chest_open", False)),
             smart_cursor=bool(eq.get("smart_cursor", False)),
+            biome=str(p.get("biome", "forest")),
         )
 
     def _empty_state(self) -> GameState:
@@ -422,6 +423,13 @@ class TerraBlindClient:
     def _note_error(self, kind: str) -> None:
         if self._last_error_kind != kind:
             self._last_error_kind = kind
+
+    def quick_heal(self) -> bool:
+        try:
+            with _OPENER.open(_BASE_URL + "/quick_heal", timeout=self._timeout) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
 
     def loot_all(self) -> bool:
         try:
