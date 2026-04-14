@@ -18,6 +18,7 @@ class ActionType(str, Enum):
     PICK_UP = "pick_up"
     KEY_PRESS = "key_press"
     LOOT_ALL = "loot_all"
+    QUICK_HEAL = "quick_heal"
     NONE = "none"
 
 

@@ -7,6 +7,7 @@ from typing import Protocol
 
 from terraria_agent.cerebellum.screen_capture import ScreenCapture
 from terraria_agent.cerebellum.vision import UIVisionDetector
+from terraria_agent.hand.arbiter import arbitrate
 from terraria_agent.hand.controller import HandController
 from terraria_agent.hud.state_bridge import HUDSnapshot, StateBridge
 from terraria_agent.models.actions import GameAction
@@ -148,6 +149,12 @@ class AgentOrchestrator:
             except Exception:
                 self._bridge.log(f"[bt] tick error: {traceback.format_exc(limit=2)}")
                 return
+
+        kept, dropped = arbitrate(ctx.action_buffer)
+        if dropped:
+            reasons = ", ".join(f"{a.action.value}×{r.value}" for a, r in dropped)
+            self._bridge.log(f"[arbiter] dropped: {reasons}")
+        ctx.action_buffer = kept
 
         try:
             self._hand.execute(ctx.action_buffer)

@@ -38,14 +38,14 @@ def build_root_tree():
     └── ACTIVE [Parallel] — combat + movement run together
         ├── Always(COMBAT)   — attack enemies without stopping movement
         └── MOVE_OR_EXPLORE [PrioritySelector]
-            ├── TERRAIN         — pit / block wall / dark
-            ├── TASK_EXECUTOR   — Brain's task queue
+            ├── TASK_EXECUTOR   — Brain's task queue (chop tree blocks terrain)
+            ├── TERRAIN         — pit / block wall / dark (fallback for movement tasks)
             └── IDLE            — fallback
     """
     move_branch = PrioritySelector(
         children=[
-            build_terrain_tree(),
             build_task_executor(),
+            build_terrain_tree(),
             Idle(name="Idle"),
         ],
         name="MoveOrExplore",

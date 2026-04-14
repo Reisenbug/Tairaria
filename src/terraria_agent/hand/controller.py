@@ -15,6 +15,7 @@ pyautogui.PAUSE = 0.0
 pyautogui.FAILSAFE = False
 
 _LOOT_ALL_URL = "http://127.0.0.1:17878/loot_all"
+_QUICK_HEAL_URL = "http://127.0.0.1:17878/quick_heal"
 _NO_PROXY_HANDLER = urllib.request.ProxyHandler({})
 _OPENER = urllib.request.build_opener(_NO_PROXY_HANDLER)
 
@@ -135,6 +136,8 @@ class HandController:
                 self._handle_key_press(action)
             case ActionType.LOOT_ALL:
                 self._handle_loot_all()
+            case ActionType.QUICK_HEAL:
+                self._handle_quick_heal()
             case ActionType.PICK_UP:
                 pass
             case ActionType.NONE:
@@ -209,6 +212,13 @@ class HandController:
     def _handle_loot_all(self) -> None:
         try:
             with _OPENER.open(_LOOT_ALL_URL, timeout=0.5) as resp:
+                resp.read()
+        except Exception:
+            pass
+
+    def _handle_quick_heal(self) -> None:
+        try:
+            with _OPENER.open(_QUICK_HEAL_URL, timeout=0.5) as resp:
                 resp.read()
         except Exception:
             pass
