@@ -46,6 +46,39 @@ class PlacePlatform(Action):
         return Status.SUCCESS
 
 
+class BuildBridge(Action):
+    """EXCLUSIVE task: walk forward while holding place-key with SmartCursor on.
+    Terraria auto-selects the reachable empty tile in facing direction.
+    Completes when terrain_ahead leaves PIT."""
+
+    def execute(self, ctx: TickContext) -> Status:
+        from terraria_agent.models.game_state import TerrainType
+
+        if ctx.game_state.terrain_ahead != TerrainType.PIT:
+            return Status.SUCCESS
+
+        platform_slot = next(
+            (s.slot_index for s in ctx.game_state.inventory_slots[:10] if s.is_platform),
+            None,
+        )
+        if platform_slot is None:
+            return Status.FAILURE
+
+        if not ctx.game_state.smart_cursor:
+            ctx.action_buffer.append(GameAction(action=ActionType.KEY_PRESS, item="smart_cursor"))
+            return Status.RUNNING
+
+        if ctx.game_state.player.selected_slot != platform_slot:
+            ctx.action_buffer.append(GameAction(action=ActionType.SWITCH_SLOT, slot=platform_slot))
+            return Status.RUNNING
+
+        direction = ctx.game_state.player.direction
+        ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction=direction))
+        ctx.action_buffer.append(GameAction(action=ActionType.PLACE_BLOCK, item="platform"))
+        ctx.bt_trace.append(f"BuildBridge({direction})")
+        return Status.RUNNING
+
+
 class Swim(Action):
     def execute(self, ctx: TickContext) -> Status:
         direction = ctx.game_state.player.direction

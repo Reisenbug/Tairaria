@@ -1,4 +1,4 @@
-from .movement import MoveLeft, MoveRight, Jump, PlacePlatform, MoveToObject, MineForward, Swim
+from .movement import MoveLeft, MoveRight, Jump, PlacePlatform, BuildBridge, MoveToObject, MineForward, Swim
 from .combat import AttackNearest, SwitchToSword, SwitchToBestWeapon, Dodge
 from .interaction import ShakeTree, ChopBigTree, BigTreeChopped, PickUpValuableDrop, OpenChest, PickUp
 from .survival import UsePotion, PlaceTorch, SignalBrainEmergency
