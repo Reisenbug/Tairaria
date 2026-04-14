@@ -9,6 +9,7 @@ from terraria_agent.cerebellum.screen_capture import ScreenCapture
 from terraria_agent.cerebellum.vision import UIVisionDetector
 from terraria_agent.hand.arbiter import arbitrate
 from terraria_agent.hand.controller import HandController
+from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.hud.state_bridge import HUDSnapshot, StateBridge
 from terraria_agent.models.actions import GameAction
 from terraria_agent.models.game_state import GameState, Player
@@ -66,9 +67,7 @@ class AgentOrchestrator:
         self._interval = 1.0 / tick_rate
         self._capture = capture if capture is not None else ScreenCapture()
         self._detector = detector if detector is not None else UIVisionDetector()
-        self._hand = hand if hand is not None else HandController(
-            mouse_control_flag=bridge.is_mouse_control_enabled,
-        )
+        self._hand = hand if hand is not None else ModController()
         self._bt_root = bt_root if bt_root is not None else build_root_tree()
         self._task_queue = TaskQueue(goal="idle", task_queue=[])
         self._smart_cursor = False
