@@ -11,21 +11,8 @@ if TYPE_CHECKING:
     from terraria_agent.spinal_cord.context import TickContext
 
 
-_STUCK_VELOCITY = 0.1
-_STUCK_THRESHOLD = 3
-_stuck_ticks = 0
-
-
 def _emit_move(ctx: TickContext, direction: str) -> None:
-    global _stuck_ticks
     ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction=direction))
-    if abs(ctx.game_state.player.velocity[0]) < _STUCK_VELOCITY:
-        _stuck_ticks += 1
-        if _stuck_ticks >= _STUCK_THRESHOLD:
-            ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
-            _stuck_ticks = 0
-    else:
-        _stuck_ticks = 0
 
 
 class MoveLeft(Action):
