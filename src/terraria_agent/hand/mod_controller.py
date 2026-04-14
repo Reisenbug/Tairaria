@@ -20,8 +20,9 @@ _LOOT_ALL_URL = "http://127.0.0.1:17878/loot_all"
 
 
 class ModController:
-    def __init__(self):
+    def __init__(self, mouse_control_flag=None):
         self.key_state = KeyState()
+        self._mouse_enabled = mouse_control_flag or (lambda: True)
 
     def execute(self, actions: list[GameAction]) -> None:
         ctrl: dict = {}
@@ -34,7 +35,7 @@ class ModController:
                     ctrl["jump"] = True
                 case ActionType.ATTACK:
                     ctrl["use_item"] = True
-                    if a.target:
+                    if a.target and self._mouse_enabled():
                         pyautogui.moveTo(int(a.target[0]), int(a.target[1]))
                 case ActionType.USE_ITEM:
                     ctrl["use_item"] = True
