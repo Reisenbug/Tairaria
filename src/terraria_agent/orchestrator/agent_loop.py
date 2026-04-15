@@ -72,6 +72,7 @@ class AgentOrchestrator:
         )
         self._bt_root = bt_root if bt_root is not None else build_root_tree()
         self._task_queue = TaskQueue(goal="idle", task_queue=[])
+        self._looted_chests: set[tuple[int, int]] = set()
         self._smart_cursor = False
         self._oneshot: Node | None = None
         self._tick_count = 0
@@ -143,6 +144,7 @@ class AgentOrchestrator:
             task_queue=self._task_queue,
             dt=self._interval,
             smart_cursor=game_state.smart_cursor,
+            looted_chests=self._looted_chests,
         )
         oneshot = self._oneshot
         self._oneshot = None

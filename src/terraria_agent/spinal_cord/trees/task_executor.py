@@ -9,7 +9,7 @@ from terraria_agent.spinal_cord.bt.leaves import Condition
 from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveRight, MoveToObject, BuildBridge
 from terraria_agent.spinal_cord.actions.interaction import (
     ShakeTree, ChopBigTree, BigTreeChopped, PickUpValuableDrop,
-    OpenChest, EnsureSmartCursorOn, LootAll,
+    OpenChest, EnsureSmartCursorOn, LootAll, MarkChestLooted,
 )
 from terraria_agent.spinal_cord.actions.crafting import CraftPlatforms
 
@@ -50,7 +50,10 @@ def _pit_unreachable_ahead(ctx: TickContext) -> bool:
 
 TRIGGER_REGISTRY: dict[str, Callable[[TickContext], bool]] = {
     "big_tree_nearby": _has_big_tree_nearby,
-    "chest_nearby": lambda ctx: any(o.type == "chest" for o in ctx.game_state.objects),
+    "chest_nearby": lambda ctx: any(
+        o.type == "chest" and o.tile_pos not in ctx.looted_chests
+        for o in ctx.game_state.objects
+    ),
     "wood_gte_10": lambda ctx: ctx.game_state.inventory.get("wood", 0) >= 10,
     "pit_unreachable_ahead": _pit_unreachable_ahead,
     "default": lambda ctx: True,
@@ -86,6 +89,7 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
                 EnsureSmartCursorOn(),
                 OpenChest(),
                 LootAll(),
+                MarkChestLooted(),
             ],
             name="Task_chest_nearby",
         )

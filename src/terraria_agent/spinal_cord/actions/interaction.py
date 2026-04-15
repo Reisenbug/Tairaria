@@ -130,6 +130,15 @@ class LootAll(Action):
         return Status.SUCCESS
 
 
+class MarkChestLooted(Action):
+    def execute(self, ctx: TickContext) -> Status:
+        chests = [o for o in ctx.game_state.objects if o.type == "chest"]
+        if chests:
+            nearest = min(chests, key=lambda o: o.distance)
+            ctx.looted_chests.add(nearest.tile_pos)
+        return Status.SUCCESS
+
+
 class PickUp(Action):
     def execute(self, ctx: TickContext) -> Status:
         ctx.action_buffer.append(GameAction(action=ActionType.PICK_UP))
