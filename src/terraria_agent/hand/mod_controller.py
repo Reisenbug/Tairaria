@@ -54,7 +54,7 @@ class ModController:
                         pyautogui.click(button="right")
                 case ActionType.KEY_PRESS:
                     if a.item == "smart_cursor":
-                        ctrl["smart_cursor"] = True
+                        pyautogui.press("ctrl")
                 case ActionType.LOOT_ALL:
                     self._http_fire(_LOOT_ALL_URL)
                 case ActionType.QUICK_HEAL:
