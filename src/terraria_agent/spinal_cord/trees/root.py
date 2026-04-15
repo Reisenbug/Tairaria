@@ -44,7 +44,6 @@ def build_root_tree():
     """
     move_branch = Parallel(
         children=[
-            AlwaysSucceed(build_terrain_tree(), name="TerrainBG"),
             PrioritySelector(
                 children=[
                     build_task_executor(),
@@ -52,6 +51,7 @@ def build_root_tree():
                 ],
                 name="TaskOrIdle",
             ),
+            AlwaysSucceed(build_terrain_tree(), name="TerrainBG"),
         ],
         success_threshold=2,
         name="MoveOrExplore",
