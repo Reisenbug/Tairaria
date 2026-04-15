@@ -123,8 +123,12 @@ class StuckJump(Action):
         on_ground = player.velocity[1] == 0.0
         moving = abs(player.velocity[0]) > _STUCK_VEL_THRESHOLD
 
-        if not on_ground or moving:
+        if moving:
             self._stuck_ticks = 0
+            self._jump_count = 0
+            return Status.FAILURE
+
+        if not on_ground:
             return Status.FAILURE
 
         has_move = any(
