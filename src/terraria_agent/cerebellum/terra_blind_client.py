@@ -236,6 +236,7 @@ class TerraBlindClient:
                     hammer=int(raw.get("hammer", 0)),
                     create_tile=int(raw.get("create_tile", -1)),
                     consumable=bool(raw.get("consumable", False)),
+                    category=raw.get("category", "misc"),
                 ))
 
         hotbar: list[Optional[str]] = [None] * 10

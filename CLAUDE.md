@@ -23,6 +23,9 @@ ControlInput timeout 必須大於 JumpHoldFrames + gap 幀，否則 pending jump
 ### 兩個 jump 源 = 衝突
 Python StuckJump + mod auto-jump 搶同一個 `_jumpFramesLeft`，導致間歇性失敗（heisenbug）。原則：一個機制只能有一個控制源。跳躍現在完全由 mod 端負責。
 
+### 手動序列化陷阱
+`StateSerializer.cs` 是手寫 StringBuilder，不會自動反射新欄位。加新欄位到 data class（如 `HotbarSlot`）後，**必須同步改 `AppendSlot`**，否則 JSON 裡不會出現。
+
 ## 架構規則
 
 ### 動作歸屬

@@ -9,6 +9,7 @@ from terraria_agent.cerebellum.screen_capture import ScreenCapture
 from terraria_agent.cerebellum.vision import UIVisionDetector
 from terraria_agent.hand.arbiter import arbitrate
 from terraria_agent.hand.controller import HandController
+from terraria_agent.hand.hotbar_organizer import organize_hotbar
 from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.hud.state_bridge import HUDSnapshot, StateBridge
 from terraria_agent.models.actions import GameAction
@@ -129,6 +130,10 @@ class AgentOrchestrator:
 
         frame = self._capture.capture()
         game_state = self._detector.detect(frame)
+
+        swaps = organize_hotbar(game_state.inventory_slots)
+        if swaps:
+            self._bridge.log(f"[hotbar] {len(swaps)} swaps")
 
         tq = self._task_queue
         if (

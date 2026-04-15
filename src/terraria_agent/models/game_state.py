@@ -52,6 +52,7 @@ class InventorySlot(BaseModel):
     hammer: int = 0
     create_tile: int = -1
     consumable: bool = False
+    category: str = "misc"
 
     @property
     def is_empty(self) -> bool:
@@ -59,23 +60,27 @@ class InventorySlot(BaseModel):
 
     @property
     def is_weapon(self) -> bool:
-        return self.damage > 0 and self.pick == 0 and self.axe == 0 and self.hammer == 0
+        return self.category == "weapon"
 
     @property
     def is_pickaxe(self) -> bool:
-        return self.pick > 0
+        return self.category == "pickaxe"
 
     @property
     def is_axe(self) -> bool:
-        return self.axe > 0
+        return self.category == "axe"
 
     @property
     def is_platform(self) -> bool:
-        return "platform" in self.name.lower()
+        return self.category == "platform"
 
     @property
     def is_block(self) -> bool:
-        return self.create_tile >= 0 and not self.is_platform
+        return self.category == "block"
+
+    @property
+    def is_torch(self) -> bool:
+        return self.category == "torch"
 
 
 class Camera(BaseModel):

@@ -12,7 +12,6 @@ if TYPE_CHECKING:
 
 VALUABLE_DROPS = {"fruit", "gold_coin", "pet"}
 
-_AXE_SLOT = 2
 _big_trees_chopped = 0
 _BIG_TREE_LIMIT = 2
 _BIG_TREE_HEIGHT = 16
@@ -33,14 +32,26 @@ def _tree_height(ctx: TickContext, tree_obj) -> int:
     return height
 
 
-def _ensure_axe(ctx: TickContext) -> None:
-    if ctx.game_state.player.selected_slot != _AXE_SLOT:
-        ctx.action_buffer.append(GameAction(action=ActionType.SWITCH_SLOT, slot=_AXE_SLOT))
+def _find_axe_slot(ctx: TickContext) -> int | None:
+    for s in ctx.game_state.inventory_slots[:10]:
+        if s.is_axe:
+            return s.slot_index
+    return None
+
+
+def _ensure_axe(ctx: TickContext) -> bool:
+    slot = _find_axe_slot(ctx)
+    if slot is None:
+        return False
+    if ctx.game_state.player.selected_slot != slot:
+        ctx.action_buffer.append(GameAction(action=ActionType.SWITCH_SLOT, slot=slot))
+    return True
 
 
 class ShakeTree(Action):
     def execute(self, ctx: TickContext) -> Status:
-        _ensure_axe(ctx)
+        if not _ensure_axe(ctx):
+            return Status.FAILURE
         if not ctx.game_state.smart_cursor:
             ctx.action_buffer.append(GameAction(action=ActionType.KEY_PRESS, item="smart_cursor"))
         facing = ctx.game_state.player.direction
@@ -63,7 +74,8 @@ class ChopBigTree(Action):
         nearest = min(big_trees, key=lambda o: o.distance)
         if nearest.distance > 4.0:
             return Status.FAILURE
-        _ensure_axe(ctx)
+        if not _ensure_axe(ctx):
+            return Status.FAILURE
         screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
         ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
         ctx.bt_trace.append(f"ChopBig({_big_trees_chopped}/{_BIG_TREE_LIMIT})")
