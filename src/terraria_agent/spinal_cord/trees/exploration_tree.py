@@ -1,10 +1,10 @@
 from terraria_agent.spinal_cord.bt import Sequence, Selector
 from terraria_agent.spinal_cord.bt.leaves import Condition
 from terraria_agent.spinal_cord.conditions.environment import (
-    IsBlockWallAhead, IsWaterAhead, IsDark, CanJumpOverObstacle,
+    IsBlockWallAhead, IsWaterAhead, IsDark,
 )
 from terraria_agent.spinal_cord.conditions.inventory import HasTorch, HasPickaxe
-from terraria_agent.spinal_cord.actions.movement import Jump, MineForward, Swim, StuckJump
+from terraria_agent.spinal_cord.actions.movement import MineForward, Swim
 from terraria_agent.spinal_cord.actions.survival import PlaceTorch
 
 
@@ -26,11 +26,7 @@ def build_terrain_tree():
             Sequence(
                 children=[
                     IsBlockWallAhead(),
-                    Selector(children=[
-                        Sequence(children=[CanJumpOverObstacle(), Jump()]),
-                        Sequence(children=[HasPickaxe(), MineForward()]),
-                        Jump(),
-                    ], name="BlockWallStrategy"),
+                    Sequence(children=[HasPickaxe(), MineForward()]),
                 ],
                 name="BlockWallHandling",
             ),
@@ -42,7 +38,6 @@ def build_terrain_tree():
                 children=[IsDark(), HasTorch(), PlaceTorch()],
                 name="DarkHandling",
             ),
-            StuckJump(),
             ], name="TerrainBranches"),
         ],
         name="Terrain",
