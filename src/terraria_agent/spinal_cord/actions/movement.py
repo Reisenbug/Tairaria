@@ -108,6 +108,55 @@ class MineForward(Action):
         return Status.SUCCESS
 
 
+_STUCK_VEL_THRESHOLD = 0.3
+_STUCK_JUMP_LIMIT = 3
+
+
+class StuckJump(Action):
+    def __init__(self, name: str = "StuckJump"):
+        super().__init__(name)
+        self._stuck_ticks = 0
+        self._jump_count = 0
+
+    def execute(self, ctx: TickContext) -> Status:
+        player = ctx.game_state.player
+        on_ground = player.velocity[1] == 0.0
+        moving = abs(player.velocity[0]) > _STUCK_VEL_THRESHOLD
+
+        if not on_ground or moving:
+            self._stuck_ticks = 0
+            return Status.FAILURE
+
+        has_move = any(
+            a.action == ActionType.MOVE for a in ctx.action_buffer
+        )
+        if not has_move:
+            self._stuck_ticks = 0
+            return Status.FAILURE
+
+        self._stuck_ticks += 1
+        if self._stuck_ticks < 2:
+            return Status.FAILURE
+
+        if self._jump_count >= _STUCK_JUMP_LIMIT:
+            self._jump_count = 0
+            self._stuck_ticks = 0
+            ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
+            facing = player.direction
+            sign = 1.0 if facing == "right" else -1.0
+            from terraria_agent.geometry import tile_offset_world, world_to_screen
+            target = tile_offset_world(player, sign * 1.0, 0.0)
+            screen_xy = world_to_screen(target, ctx.game_state.camera)
+            ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
+            ctx.bt_trace.append("StuckMine")
+            return Status.SUCCESS
+
+        self._jump_count += 1
+        ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
+        ctx.bt_trace.append(f"StuckJump({self._jump_count}/{_STUCK_JUMP_LIMIT})")
+        return Status.SUCCESS
+
+
 class MoveToObject(Action):
     def __init__(self, object_type: str, reach_tiles: float = 4.0, name: str = ""):
         super().__init__(name)

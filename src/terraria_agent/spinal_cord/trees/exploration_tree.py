@@ -4,7 +4,7 @@ from terraria_agent.spinal_cord.conditions.environment import (
     IsBlockWallAhead, IsWaterAhead, IsDark, CanJumpOverObstacle,
 )
 from terraria_agent.spinal_cord.conditions.inventory import HasTorch, HasPickaxe
-from terraria_agent.spinal_cord.actions.movement import Jump, MineForward, Swim
+from terraria_agent.spinal_cord.actions.movement import Jump, MineForward, Swim, StuckJump
 from terraria_agent.spinal_cord.actions.survival import PlaceTorch
 
 
@@ -42,6 +42,7 @@ def build_terrain_tree():
                 children=[IsDark(), HasTorch(), PlaceTorch()],
                 name="DarkHandling",
             ),
+            StuckJump(),
             ], name="TerrainBranches"),
         ],
         name="Terrain",
