@@ -51,7 +51,10 @@ def _pit_unreachable_ahead(ctx: TickContext) -> bool:
 TRIGGER_REGISTRY: dict[str, Callable[[TickContext], bool]] = {
     "big_tree_nearby": _has_big_tree_nearby,
     "chest_nearby": lambda ctx: any(
-        o.type == "chest" and o.tile_pos not in ctx.looted_chests
+        o.type == "chest"
+        and o.tile_pos not in ctx.looted_chests
+        and o.distance <= 8.0
+        and abs(o.pos[1] - ctx.game_state.player.pos[1]) < 6 * 16
         for o in ctx.game_state.objects
     ),
     "wood_gte_10": lambda ctx: ctx.game_state.inventory.get("wood", 0) >= 10,

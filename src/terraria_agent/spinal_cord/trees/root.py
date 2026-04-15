@@ -42,12 +42,18 @@ def build_root_tree():
             ├── TERRAIN         — pit / block wall / dark (fallback for movement tasks)
             └── IDLE            — fallback
     """
-    move_branch = PrioritySelector(
+    move_branch = Parallel(
         children=[
-            build_task_executor(),
-            build_terrain_tree(),
-            Idle(name="Idle"),
+            AlwaysSucceed(build_terrain_tree(), name="TerrainBG"),
+            PrioritySelector(
+                children=[
+                    build_task_executor(),
+                    Idle(name="Idle"),
+                ],
+                name="TaskOrIdle",
+            ),
         ],
+        success_threshold=2,
         name="MoveOrExplore",
     )
     active = Parallel(
