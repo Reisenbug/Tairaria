@@ -7,6 +7,7 @@ from typing import Protocol
 
 from terraria_agent.cerebellum.screen_capture import ScreenCapture
 from terraria_agent.cerebellum.vision import UIVisionDetector
+from terraria_agent.brain.tactician import Tactician, TacticianConfig, apply_decision
 from terraria_agent.hand.arbiter import arbitrate
 from terraria_agent.hand.controller import HandController
 from terraria_agent.hand.hotbar_organizer import organize_hotbar
@@ -72,6 +73,7 @@ class AgentOrchestrator:
             mouse_control_flag=bridge.is_mouse_control_enabled,
         )
         self._bt_root = bt_root if bt_root is not None else build_root_tree()
+        self._tactician = Tactician()
         self._task_queue = TaskQueue(goal="idle", task_queue=[])
         self._looted_chests: set[tuple[int, int]] = set()
         self._smart_cursor = False
@@ -166,6 +168,18 @@ class AgentOrchestrator:
             except Exception:
                 self._bridge.log(f"[bt] tick error: {traceback.format_exc(limit=2)}")
                 return
+
+        if ctx.brain_events:
+            self._tactician.collect_events(ctx.brain_events)
+        if self._tactician.should_call():
+            try:
+                decision = self._tactician.decide(game_state, self._task_queue)
+                if decision:
+                    msg = apply_decision(decision, self._task_queue)
+                    if msg:
+                        self._bridge.log(f"[tactician] {msg}")
+            except Exception:
+                self._bridge.log(f"[tactician] error: {traceback.format_exc(limit=2)}")
 
         kept, dropped = arbitrate(ctx.action_buffer)
         if dropped:
