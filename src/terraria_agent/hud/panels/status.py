@@ -20,7 +20,7 @@ DANGER_COLORS = {
 
 
 def create(bridge: StateBridge) -> None:
-    with dpg.collapsing_header(label="Cerebellum / Status", default_open=True):
+    with dpg.collapsing_header(label="Cerebellum / Status", default_open=False):
         dpg.add_progress_bar(tag=HP_BAR, default_value=0.0, overlay="0/0", width=-1)
         dpg.add_text("HP: --", tag=HP_TEXT)
         dpg.add_text("danger: safe", tag=DANGER, color=DANGER_COLORS["safe"])

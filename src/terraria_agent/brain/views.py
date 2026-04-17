@@ -134,3 +134,33 @@ def build_view(gs: GameState, events: list[BrainEvent], goal: str, goal_achieved
         ]
 
     return view
+
+
+def build_commander_view(
+    gs: GameState,
+    strategic_events: list[BrainEvent],
+    recent_tactical_decisions: list[dict],
+    goal: str,
+    goal_achieved: bool,
+) -> dict:
+    """Strategic view: long-term state + strategic events + tactician's recent moves."""
+    p = gs.player
+    categories = sorted(
+        {s.category for s in gs.inventory_slots if not s.is_empty and s.category != "misc"}
+    )
+    view = {
+        "hp": p.hp,
+        "max_hp": p.max_hp,
+        "pos": {"x": round(p.pos[0]), "y": round(p.pos[1])},
+        "biome": gs.biome,
+        "goal": goal,
+        "goal_achieved": goal_achieved,
+        "have_categories": categories,
+    }
+    if recent_tactical_decisions:
+        view["recent_tactical_decisions"] = recent_tactical_decisions[-5:]
+    if strategic_events:
+        view["strategic_events"] = [
+            {"type": e.type, **e.details} for e in strategic_events[-10:]
+        ]
+    return view

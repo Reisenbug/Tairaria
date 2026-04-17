@@ -7,6 +7,7 @@ from typing import Protocol
 
 from terraria_agent.cerebellum.screen_capture import ScreenCapture
 from terraria_agent.cerebellum.vision import UIVisionDetector
+from terraria_agent.brain.commander import Commander, apply_commander_decision
 from terraria_agent.brain.events import EventBuffer
 from terraria_agent.brain.tactician import Tactician, TacticianConfig, apply_decision
 from terraria_agent.hand.arbiter import arbitrate
@@ -75,8 +76,11 @@ class AgentOrchestrator:
         )
         self._bt_root = bt_root if bt_root is not None else build_root_tree()
         self._tactician = Tactician()
+        self._commander = Commander()
         self._event_buffer = EventBuffer(maxlen=50)
         self._last_tactician_msg = ""
+        self._last_commander_msg = ""
+        self._commander_warned = False
         self._task_queue = TaskQueue(goal="idle", task_queue=[])
         self._looted_chests: set[tuple[int, int]] = set()
         self._smart_cursor = False
@@ -175,6 +179,22 @@ class AgentOrchestrator:
         if ctx.brain_events:
             self._event_buffer.extend(ctx.brain_events)
             self._tactician.collect_events(ctx.brain_events)
+
+        if not self._commander.config.api_key and not self._commander_warned:
+            self._commander_warned = True
+            self._bridge.log("[commander] no API key set — strategic layer disabled")
+        if self._commander.should_call(self._event_buffer):
+            self._commander.maybe_start(game_state, self._task_queue, self._event_buffer)
+        cmd_decision = self._commander.poll_decision()
+        if cmd_decision:
+            try:
+                cmsg = apply_commander_decision(cmd_decision, self._task_queue)
+                if cmsg:
+                    self._last_commander_msg = cmsg
+                    self._bridge.log(f"[commander] {cmsg}")
+            except Exception:
+                self._bridge.log(f"[commander] error: {traceback.format_exc(limit=2)}")
+
         if self._tactician.should_call():
             self._tactician.maybe_start(game_state, self._task_queue, self._event_buffer)
         decision = self._tactician.poll_decision()
@@ -184,6 +204,7 @@ class AgentOrchestrator:
                 if msg:
                     self._last_tactician_msg = msg
                     self._bridge.log(f"[tactician] {msg}")
+                self._commander.record_tactical_decision(decision)
             except Exception:
                 self._bridge.log(f"[tactician] error: {traceback.format_exc(limit=2)}")
 
@@ -231,6 +252,9 @@ class AgentOrchestrator:
             tactician_input=self._tactician.last_input,
             tactician_output=self._tactician.last_output,
             tactician_msg=self._last_tactician_msg,
+            commander_input=self._commander.last_input,
+            commander_output=self._commander.last_output,
+            commander_msg=self._last_commander_msg,
             tick_count=self._tick_count,
             tps=self._tps,
             timestamp=time.time(),

@@ -8,7 +8,7 @@ KEYS = "hand_keys"
 
 
 def create(bridge: StateBridge) -> None:
-    with dpg.collapsing_header(label="Hand / Input", default_open=True):
+    with dpg.collapsing_header(label="Hand / Input", default_open=False):
         dpg.add_text("held: -", tag=KEYS, wrap=380)
 
 

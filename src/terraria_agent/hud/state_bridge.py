@@ -29,6 +29,10 @@ class HUDSnapshot:
     tactician_output: str = ""
     tactician_msg: str = ""
 
+    commander_input: str = ""
+    commander_output: str = ""
+    commander_msg: str = ""
+
     tick_count: int = 0
     tps: float = 0.0
     timestamp: float = 0.0

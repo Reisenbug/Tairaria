@@ -18,7 +18,7 @@ STATUS_COLORS = {
 
 
 def create(bridge: StateBridge) -> None:
-    with dpg.collapsing_header(label="Spinal Cord / BT", default_open=True):
+    with dpg.collapsing_header(label="Spinal Cord / BT", default_open=False):
         dpg.add_text("branch: -", tag=BRANCH, wrap=380)
         dpg.add_text("status: -", tag=STATUS)
         dpg.add_text("actions:\n-", tag=ACTIONS, wrap=380)

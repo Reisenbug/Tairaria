@@ -53,11 +53,10 @@ Rules:
 - Default: {"action": "noop"} — BT continues as-is.
 - NEVER include trigger="default" in set_tasks. The baseline walk task is system-managed.
 
-Action schema:
+Action schema (you do NOT set goals — commander handles that):
 - {"action": "noop"}
 - {"action": "change_direction", "direction": "left"|"right"}
 - {"action": "set_tasks", "tasks": [{"trigger": "...", "action": "...", "priority": "baseline"|"high"|"critical"}]}
-- {"action": "set_goal", "goal": "description"}
 - {"action": "retreat", "reason": "..."}
 - {"action": "use_item", "slot": N}
 - {"action": "select_weapon", "preference": "melee"|"ranged"|"best_dps"}
@@ -206,8 +205,7 @@ def apply_decision(decision: dict, task_queue: TaskQueue) -> str | None:
         return None
 
     if action == "set_goal":
-        task_queue.goal = decision.get("goal", task_queue.goal)
-        return f"goal → {task_queue.goal}"
+        return "rejected: set_goal is commander-only"
 
     if action == "retreat":
         for task in task_queue.task_queue:
