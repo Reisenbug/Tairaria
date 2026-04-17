@@ -40,6 +40,13 @@ Rules:
 - Be concise. Return ONLY valid JSON, no markdown.
 - If nothing needs changing, return {"action": "noop"}
 
+Terrain columns format (terrain_columns_ahead):
+- "+N:" means N tiles ahead in facing direction
+- Numbers are Y offsets from feet: negative=above, 0=feet level, positive=below
+- "solid at [0,1,2]" = ground. "air" = no solid tile (gap/pit). "lava@N"/"water@N" = liquid.
+- Player jump_height ~6 tiles up, ~4 tiles across. Fall >25 tiles = death (unless no_fall_dmg).
+- Example: +1:[0,1] +2:air +3:air +4:[2,3] = 2-tile wide gap, landing 2 tiles lower.
+
 Available actions:
 - {"action": "noop"} — do nothing, BT continues as-is
 - {"action": "change_direction", "direction": "left"|"right"}
@@ -49,6 +56,42 @@ Available actions:
 - {"action": "use_item", "slot": N}
 - {"action": "select_weapon", "preference": "melee"|"ranged"|"best_dps"}
 """
+
+
+def _scan_ahead_text(gs: GameState, columns: int = 20) -> str | None:
+    tw = gs.tile_window
+    if not tw or not tw.rows:
+        return None
+    p = gs.player
+    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
+    feet_y = int((p.pos[1] + p.height) / 16.0)
+    sign = 1 if p.direction == "right" else -1
+
+    lines = []
+    for i in range(1, columns + 1):
+        cx = pcx + sign * i
+        rx = cx - tw.origin[0]
+        solids = []
+        for dy in range(-4, 10):
+            wy = feet_y + dy
+            ry = wy - tw.origin[1]
+            if 0 <= ry < tw.height and 0 <= rx < tw.width:
+                col = 0
+                for run in tw.rows[ry]:
+                    if rx < col + run.count:
+                        if run.solid:
+                            solids.append(dy)
+                        elif run.lava:
+                            solids.append(f"lava@{dy}")
+                        elif run.water:
+                            solids.append(f"water@{dy}")
+                        break
+                    col += run.count
+        if solids:
+            lines.append(f"+{i}: {solids}")
+        else:
+            lines.append(f"+{i}: air")
+    return "\n".join(lines)
 
 
 def _summarize_state(gs: GameState) -> dict[str, Any]:
@@ -66,7 +109,7 @@ def _summarize_state(gs: GameState) -> dict[str, Any]:
         for e in gs.enemies[:5]
     ]
 
-    return {
+    result = {
         "hp": p.hp,
         "max_hp": p.max_hp,
         "pos": {"x": round(p.pos[0]), "y": round(p.pos[1])},
@@ -77,7 +120,18 @@ def _summarize_state(gs: GameState) -> dict[str, Any]:
         "inventory_by_category": inv_summary,
         "enemies": enemies,
         "nearby_objects": [{"type": o.type, "dist": round(o.distance, 1)} for o in gs.objects[:8]],
+        "movement": {
+            "jump_height": gs.movement.jump_height,
+            "max_run_speed": gs.movement.max_run_speed,
+            "no_fall_dmg": gs.movement.no_fall_dmg,
+        },
     }
+
+    terrain_text = _scan_ahead_text(gs)
+    if terrain_text:
+        result["terrain_columns_ahead"] = terrain_text
+
+    return result
 
 
 def _summarize_events(events: list[BrainEvent]) -> list[dict]:
