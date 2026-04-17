@@ -3,14 +3,16 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import threading
 import time
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
+from terraria_agent.brain.events import BrainEvent, EventBuffer, Severity
+from terraria_agent.brain.views import build_view
 from terraria_agent.models.game_state import GameState
 from terraria_agent.models.task_queue import Task, TaskPriority, TaskQueue
-from terraria_agent.spinal_cord.context import BrainEvent
 
 
 def _load_dotenv() -> None:
@@ -32,110 +34,34 @@ _DEFAULT_MODEL = os.environ.get("TACTICIAN_MODEL", "deepseek-v3.2")
 _DEFAULT_API_KEY = os.environ.get("TACTICIAN_API_KEY", "")
 
 SYSTEM_PROMPT = """\
-You are a Terraria tactical AI. You receive game state and events from the behavior tree (BT).
-Your job: decide what to do next by returning a JSON action.
+You are a Terraria tactical AI. BT (behavior tree) handles walking, mining, swimming, combat automatically.
+You get a scenario-filtered view of state + recent events. Decide what to override.
+
+Input shape: {"scenario": "walking"|"combat"|"low_hp"|"terrain", "hp", "pos", "dir", "biome", ...scenario-specific, "events": [...]}
+
+Scenario-specific fields:
+- walking: terrain_ahead (12 cols), on_ground, have (inventory categories)
+- combat: enemies, weapons (inv), buffs
+- low_hp: enemies, consumables (inv), buffs
+- terrain: terrain_ahead (16 cols), movement (jump/speed/no_fall_dmg), have
+
+terrain_ahead format: "+N:[y-offsets]" per column. "+1:[0,1]" = solid at feet+0,+1. "+2:air" = gap.
+lava@N / water@N for liquid. Jump ~6 up / ~4 across. Fall >25 tiles = death unless no_fall_dmg.
 
 Rules:
-- BT handles movement, mining, swimming, combat automatically. You handle decisions BT can't make.
-- Be concise. Return ONLY valid JSON, no markdown.
-- If nothing needs changing, return {"action": "noop"}
+- Return ONLY valid JSON, no markdown, no prose.
+- Default: {"action": "noop"} — BT continues as-is.
+- NEVER include trigger="default" in set_tasks. The baseline walk task is system-managed.
 
-Terrain columns format (terrain_columns_ahead):
-- "+N:" means N tiles ahead in facing direction
-- Numbers are Y offsets from feet: negative=above, 0=feet level, positive=below
-- "solid at [0,1,2]" = ground. "air" = no solid tile (gap/pit). "lava@N"/"water@N" = liquid.
-- Player jump_height ~6 tiles up, ~4 tiles across. Fall >25 tiles = death (unless no_fall_dmg).
-- Example: +1:[0,1] +2:air +3:air +4:[2,3] = 2-tile wide gap, landing 2 tiles lower.
-
-Available actions:
-- {"action": "noop"} — do nothing, BT continues as-is
+Action schema:
+- {"action": "noop"}
 - {"action": "change_direction", "direction": "left"|"right"}
-- {"action": "set_tasks", "tasks": [{"trigger": "...", "action": "...", "priority": "..."}]}
+- {"action": "set_tasks", "tasks": [{"trigger": "...", "action": "...", "priority": "baseline"|"high"|"critical"}]}
 - {"action": "set_goal", "goal": "description"}
 - {"action": "retreat", "reason": "..."}
 - {"action": "use_item", "slot": N}
 - {"action": "select_weapon", "preference": "melee"|"ranged"|"best_dps"}
 """
-
-
-def _scan_ahead_text(gs: GameState, columns: int = 20) -> str | None:
-    tw = gs.tile_window
-    if not tw or not tw.rows:
-        return None
-    p = gs.player
-    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
-    feet_y = int((p.pos[1] + p.height) / 16.0)
-    sign = 1 if p.direction == "right" else -1
-
-    lines = []
-    for i in range(1, columns + 1):
-        cx = pcx + sign * i
-        rx = cx - tw.origin[0]
-        solids = []
-        for dy in range(-4, 10):
-            wy = feet_y + dy
-            ry = wy - tw.origin[1]
-            if 0 <= ry < tw.height and 0 <= rx < tw.width:
-                col = 0
-                for run in tw.rows[ry]:
-                    if rx < col + run.count:
-                        if run.solid:
-                            solids.append(dy)
-                        elif run.lava:
-                            solids.append(f"lava@{dy}")
-                        elif run.water:
-                            solids.append(f"water@{dy}")
-                        break
-                    col += run.count
-        if solids:
-            lines.append(f"+{i}: {solids}")
-        else:
-            lines.append(f"+{i}: air")
-    return "\n".join(lines)
-
-
-def _summarize_state(gs: GameState) -> dict[str, Any]:
-    p = gs.player
-    inv_summary = {}
-    for s in gs.inventory_slots:
-        if not s.is_empty:
-            cat = s.category
-            if cat not in inv_summary:
-                inv_summary[cat] = []
-            inv_summary[cat].append({"name": s.name, "slot": s.slot_index, "stack": s.stack})
-
-    enemies = [
-        {"name": e.type, "hp": e.hp, "dist": round(e.distance, 1), "boss": e.boss}
-        for e in gs.enemies[:5]
-    ]
-
-    result = {
-        "hp": p.hp,
-        "max_hp": p.max_hp,
-        "pos": {"x": round(p.pos[0]), "y": round(p.pos[1])},
-        "direction": p.direction,
-        "biome": gs.biome,
-        "terrain_ahead": gs.terrain_ahead.value,
-        "on_ground": p.velocity[1] == 0.0,
-        "inventory_by_category": inv_summary,
-        "enemies": enemies,
-        "nearby_objects": [{"type": o.type, "dist": round(o.distance, 1)} for o in gs.objects[:8]],
-        "movement": {
-            "jump_height": gs.movement.jump_height,
-            "max_run_speed": gs.movement.max_run_speed,
-            "no_fall_dmg": gs.movement.no_fall_dmg,
-        },
-    }
-
-    terrain_text = _scan_ahead_text(gs)
-    if terrain_text:
-        result["terrain_columns_ahead"] = terrain_text
-
-    return result
-
-
-def _summarize_events(events: list[BrainEvent]) -> list[dict]:
-    return [{"type": e.type, **e.details} for e in events]
 
 
 @dataclass
@@ -153,39 +79,63 @@ class Tactician:
     _last_call: float = 0.0
     _pending_events: list[BrainEvent] = field(default_factory=list)
     _opener: Any = field(default=None, repr=False)
+    _inflight: Any = field(default=None, repr=False)
+    _ready_decision: dict | None = field(default=None, repr=False)
+    _lock: Any = field(default=None, repr=False)
+    last_input: str = ""
+    last_output: str = ""
 
     def __post_init__(self):
         self._opener = urllib.request.build_opener()
+        self._lock = threading.Lock()
 
     def collect_events(self, events: list[BrainEvent]) -> None:
         self._pending_events.extend(events)
 
     def should_call(self) -> bool:
+        if self._inflight is not None and self._inflight.is_alive():
+            return False
         if self._pending_events:
             return True
         return (time.monotonic() - self._last_call) >= self.config.call_interval
 
-    def decide(self, gs: GameState, task_queue: TaskQueue) -> dict | None:
+    def maybe_start(self, gs: GameState, task_queue: TaskQueue, buffer: EventBuffer | None = None) -> bool:
         if not self.config.api_key:
-            return None
+            return False
+        if self._inflight is not None and self._inflight.is_alive():
+            return False
 
-        state_summary = _summarize_state(gs)
-        state_summary["current_goal"] = task_queue.goal
-        state_summary["goal_achieved"] = task_queue.goal_achieved
-
-        events = _summarize_events(self._pending_events)
+        recent = buffer.recent_at_least(Severity.TACTICAL, limit=10) if buffer else self._pending_events
+        view = build_view(gs, recent, task_queue.goal, task_queue.goal_achieved)
         self._pending_events.clear()
+        user_msg = json.dumps(view, ensure_ascii=False)
+        self.last_input = user_msg
 
-        user_msg = json.dumps({"state": state_summary, "events": events}, ensure_ascii=False)
+        self._inflight = threading.Thread(
+            target=self._run_chat, args=(user_msg,), name="TacticianCall", daemon=True,
+        )
+        self._inflight.start()
+        return True
 
+    def _run_chat(self, user_msg: str) -> None:
         try:
-            result = self._chat(user_msg)
-            self._last_call = time.monotonic()
-            return result
-        except Exception:
-            return None
+            result, raw = self._chat(user_msg)
+            with self._lock:
+                self.last_output = raw
+                self._ready_decision = result
+                self._last_call = time.monotonic()
+        except Exception as e:
+            with self._lock:
+                self.last_output = f"ERROR: {e}"
+                self._last_call = time.monotonic()
 
-    def _chat(self, user_msg: str) -> dict | None:
+    def poll_decision(self) -> dict | None:
+        with self._lock:
+            d = self._ready_decision
+            self._ready_decision = None
+            return d
+
+    def _chat(self, user_msg: str) -> tuple[dict, str]:
         body = json.dumps({
             "model": self.config.model,
             "messages": [
@@ -209,10 +159,11 @@ class Tactician:
             data = json.loads(resp.read())
 
         content = data["choices"][0]["message"]["content"]
-        content = content.strip()
+        raw = content.strip()
+        content = raw
         if content.startswith("```"):
             content = content.split("\n", 1)[-1].rsplit("```", 1)[0]
-        return json.loads(content)
+        return json.loads(content), raw
 
 
 def apply_decision(decision: dict, task_queue: TaskQueue) -> str | None:
@@ -233,17 +184,25 @@ def apply_decision(decision: dict, task_queue: TaskQueue) -> str | None:
         new_tasks = []
         for t in raw_tasks:
             try:
+                trigger = t["trigger"]
+                if trigger == "default":
+                    continue
                 new_tasks.append(Task(
-                    trigger=t["trigger"],
+                    trigger=trigger,
                     action=t["action"],
                     priority=TaskPriority(t.get("priority", "baseline")),
                     params=t.get("params", {}),
                 ))
             except (KeyError, ValueError):
                 continue
+        preserved = [t for t in task_queue.task_queue if t.trigger == "default"]
+        non_default_existing = [t for t in task_queue.task_queue if t.trigger != "default"]
         if new_tasks:
-            task_queue.task_queue = new_tasks
-            return f"tasks replaced ({len(new_tasks)})"
+            task_queue.task_queue = preserved + new_tasks
+            return f"tasks merged (+{len(new_tasks)}, kept {len(preserved)} default)"
+        if non_default_existing:
+            task_queue.task_queue = preserved
+            return f"tasks cleared (kept {len(preserved)} default)"
         return None
 
     if action == "set_goal":

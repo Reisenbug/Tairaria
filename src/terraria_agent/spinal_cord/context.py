@@ -1,17 +1,14 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
+from terraria_agent.brain.events import BrainEvent, classify
 from terraria_agent.models.actions import GameAction
 from terraria_agent.models.game_state import GameState
 from terraria_agent.models.task_queue import TaskQueue
 
-
-@dataclass
-class BrainEvent:
-    type: str
-    details: dict = field(default_factory=dict)
-    tick: int = 0
+__all__ = ["BrainEvent", "TickContext"]
 
 
 @dataclass
@@ -29,4 +26,9 @@ class TickContext:
     looted_chests: set = field(default_factory=set)
 
     def report(self, event_type: str, **details) -> None:
-        self.brain_events.append(BrainEvent(type=event_type, details=details))
+        self.brain_events.append(BrainEvent(
+            type=event_type,
+            details=details,
+            severity=classify(event_type),
+            timestamp=time.time(),
+        ))

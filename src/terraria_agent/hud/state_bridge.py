@@ -25,6 +25,10 @@ class HUDSnapshot:
     current_goal: str = "idle"
     task_queue_summary: tuple[str, ...] = ()
 
+    tactician_input: str = ""
+    tactician_output: str = ""
+    tactician_msg: str = ""
+
     tick_count: int = 0
     tps: float = 0.0
     timestamp: float = 0.0
