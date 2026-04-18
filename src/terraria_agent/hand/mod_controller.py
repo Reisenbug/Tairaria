@@ -17,6 +17,7 @@ _OPENER = urllib.request.build_opener(_NO_PROXY_HANDLER)
 
 _QUICK_HEAL_URL = "http://127.0.0.1:17878/quick_heal"
 _LOOT_ALL_URL = "http://127.0.0.1:17878/loot_all"
+_INTERACT_URL = "http://127.0.0.1:17878/interact"
 
 
 class ModController:
@@ -48,10 +49,8 @@ class ModController:
                 case ActionType.PLACE_BLOCK:
                     need_mouse_down = True
                 case ActionType.INTERACT:
-                    if self._mouse_enabled():
-                        if a.target:
-                            pyautogui.moveTo(int(a.target[0]), int(a.target[1]))
-                        pyautogui.click(button="right")
+                    if a.tile is not None:
+                        self._http_post_json(_INTERACT_URL, {"tile_x": int(a.tile[0]), "tile_y": int(a.tile[1])})
                 case ActionType.KEY_PRESS:
                     if a.item == "smart_cursor":
                         pyautogui.press("ctrl")
@@ -83,9 +82,12 @@ class ModController:
             self._holding_mouse = False
 
     def _post_control(self, ctrl: dict) -> None:
+        self._http_post_json(_CONTROL_URL, ctrl)
+
+    def _http_post_json(self, url: str, payload: dict) -> None:
         try:
-            data = json.dumps(ctrl).encode()
-            req = urllib.request.Request(_CONTROL_URL, data=data, method="POST")
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(url, data=data, method="POST")
             req.add_header("Content-Type", "application/json")
             with _OPENER.open(req, timeout=0.2) as resp:
                 resp.read()

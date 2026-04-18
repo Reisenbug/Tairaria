@@ -26,6 +26,7 @@ class GameAction(BaseModel):
     action: ActionType
     direction: Optional[str] = None
     target: Optional[tuple[float, float]] = None
+    tile: Optional[tuple[int, int]] = None
     slot: Optional[int] = None
     item: Optional[str] = None
     quantity: Optional[int] = None

@@ -122,10 +122,9 @@ class OpenChest(Action):
         if not chests:
             return Status.FAILURE
         nearest = min(chests, key=lambda o: o.distance)
-        chest_center_world = (nearest.pos[0] + 16, nearest.pos[1] + 16)
-        target = world_to_screen(chest_center_world, ctx.game_state.camera)
-        ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, target=target))
-        ctx.bt_trace.append(f"OpenChest@{int(target[0])},{int(target[1])}")
+        tx, ty = nearest.tile_pos
+        ctx.action_buffer.append(GameAction(action=ActionType.INTERACT, tile=(tx, ty)))
+        ctx.bt_trace.append(f"OpenChest@tile({tx},{ty})")
         return Status.RUNNING
 
 
