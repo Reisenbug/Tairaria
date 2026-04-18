@@ -58,12 +58,28 @@ class HasTreeNearby(Condition):
 
 
 class HasChestNearby(Condition):
-    def __init__(self, max_distance: float = 300.0, name: str = ""):
+    """Chebyshev gap between player AABB and chest AABB in tiles (<= max_gap)."""
+
+    def __init__(self, max_gap: int = 3, name: str = ""):
         super().__init__(name)
-        self.max_distance = max_distance
+        self.max_gap = max_gap
 
     def check(self, ctx: TickContext) -> bool:
-        return any(
-            o.type == "chest" and o.distance <= self.max_distance
-            for o in ctx.game_state.objects
-        )
+        p = ctx.game_state.player
+        px = int(p.pos[0] / 16)
+        py = int(p.pos[1] / 16)
+        pw = max(1, int(p.width / 16)) if p.width else 2
+        ph = max(1, int(p.height / 16)) if p.height else 3
+        p_x1, p_x2 = px, px + pw - 1
+        p_y1, p_y2 = py, py + ph - 1
+        for o in ctx.game_state.objects:
+            if o.type != "chest":
+                continue
+            cx, cy = o.tile_pos
+            c_x1, c_x2 = cx, cx + 1
+            c_y1, c_y2 = cy, cy + 1
+            dx = max(0, p_x1 - c_x2, c_x1 - p_x2)
+            dy = max(0, p_y1 - c_y2, c_y1 - p_y2)
+            if max(dx, dy) <= self.max_gap:
+                return True
+        return False
