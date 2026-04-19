@@ -77,7 +77,7 @@ class TacticianConfig:
     model: str = _DEFAULT_MODEL
     api_key: str = _DEFAULT_API_KEY
     call_interval: float = 5.0
-    timeout: float = 10.0
+    timeout: float = 20.0
 
 
 @dataclass
