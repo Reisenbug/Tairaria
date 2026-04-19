@@ -96,6 +96,9 @@ class Tactician:
     _lock: Any = field(default=None, repr=False)
     last_input: str = ""
     last_output: str = ""
+    last_latency: float = 0.0
+    _latencies: list[float] = field(default_factory=list)
+    _call_start: float = 0.0
 
     def __post_init__(self):
         self._opener = urllib.request.build_opener()
@@ -134,6 +137,7 @@ class Tactician:
         if "grid_ahead" in view:
             diag("tactician_grid", f"scenario={view.get('scenario')} dir={view.get('dir')}\n{view['grid_ahead']}")
 
+        self._call_start = time.monotonic()
         self._inflight = threading.Thread(
             target=self._run_chat, args=(user_msg,), name="TacticianCall", daemon=True,
         )
@@ -142,18 +146,45 @@ class Tactician:
 
     def _run_chat(self, user_msg: str) -> None:
         from terraria_agent.diag_log import diag
+        start = self._call_start
         try:
             result, raw = self._chat(user_msg)
+            end = time.monotonic()
+            latency = end - start
             with self._lock:
                 self.last_output = raw
                 self._ready_decision = result
-                self._last_call = time.monotonic()
+                self._last_call = end
+                self.last_latency = latency
+                self._latencies.append(latency)
+                if len(self._latencies) > 100:
+                    self._latencies.pop(0)
             diag("tactician_output", raw)
+            diag("tactician_latency", f"ok latency={latency:.2f}s interval={self.config.call_interval}s")
         except Exception as e:
+            end = time.monotonic()
+            latency = end - start
             with self._lock:
                 self.last_output = f"ERROR: {e}"
-                self._last_call = time.monotonic()
+                self._last_call = end
+                self.last_latency = latency
             diag("tactician_output", f"ERROR: {e}")
+            diag("tactician_latency", f"err latency={latency:.2f}s err={type(e).__name__}:{e}")
+
+    def latency_stats(self) -> dict:
+        with self._lock:
+            xs = list(self._latencies)
+        if not xs:
+            return {"n": 0}
+        xs_sorted = sorted(xs)
+        n = len(xs_sorted)
+        return {
+            "n": n,
+            "mean": sum(xs_sorted) / n,
+            "p50": xs_sorted[n // 2],
+            "p95": xs_sorted[min(n - 1, int(n * 0.95))],
+            "max": xs_sorted[-1],
+        }
 
     def poll_decision(self) -> dict | None:
         with self._lock:

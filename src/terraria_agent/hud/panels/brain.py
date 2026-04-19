@@ -10,6 +10,7 @@ CMD_MSG = "brain_cmd_msg"
 CMD_IN = "brain_cmd_in"
 CMD_OUT = "brain_cmd_out"
 TAC_MSG = "brain_tac_msg"
+TAC_LAT = "brain_tac_lat"
 TAC_IN = "brain_tac_in"
 TAC_OUT = "brain_tac_out"
 
@@ -36,6 +37,7 @@ def create(bridge: StateBridge) -> None:
 
     with dpg.collapsing_header(label="Tactician (tactical)", default_open=True):
         dpg.add_text("last: —", tag=TAC_MSG, wrap=380)
+        dpg.add_text("latency: —", tag=TAC_LAT, color=(200, 200, 140), wrap=380)
         dpg.add_separator()
         dpg.add_text("input:", color=(160, 200, 255))
         dpg.add_text("—", tag=TAC_IN, wrap=380)
@@ -57,5 +59,6 @@ def update(snap: HUDSnapshot) -> None:
     dpg.set_value(CMD_OUT, _truncate(snap.commander_output) or "—")
 
     dpg.set_value(TAC_MSG, f"last: {snap.tactician_msg or '—'}")
+    dpg.set_value(TAC_LAT, f"latency: {snap.tactician_latency or '—'}")
     dpg.set_value(TAC_IN, _truncate(snap.tactician_input) or "—")
     dpg.set_value(TAC_OUT, _truncate(snap.tactician_output) or "—")

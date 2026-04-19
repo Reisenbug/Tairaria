@@ -28,6 +28,7 @@ class HUDSnapshot:
     tactician_input: str = ""
     tactician_output: str = ""
     tactician_msg: str = ""
+    tactician_latency: str = ""
 
     commander_input: str = ""
     commander_output: str = ""

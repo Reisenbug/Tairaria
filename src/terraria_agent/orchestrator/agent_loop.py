@@ -293,6 +293,7 @@ class AgentOrchestrator:
             tactician_input=self._tactician.last_input,
             tactician_output=self._tactician.last_output,
             tactician_msg=self._last_tactician_msg,
+            tactician_latency=self._format_tactician_latency(),
             commander_input=self._commander.last_input,
             commander_output=self._commander.last_output,
             commander_msg=self._last_commander_msg,
@@ -301,6 +302,16 @@ class AgentOrchestrator:
             timestamp=time.time(),
         )
         self._bridge.publish_snapshot(snap)
+
+    def _format_tactician_latency(self) -> str:
+        st = self._tactician.latency_stats()
+        if st["n"] == 0:
+            return "last=— p50=— p95=—"
+        return (
+            f"last={self._tactician.last_latency:.2f}s "
+            f"p50={st['p50']:.2f}s p95={st['p95']:.2f}s "
+            f"max={st['max']:.2f}s n={st['n']}"
+        )
 
     def _handle_command(self, cmd: str) -> None:
         text = cmd.strip()
