@@ -41,13 +41,18 @@ You get a scenario-filtered view of state + recent events. Decide what to overri
 Input shape: {"scenario": "walking"|"combat"|"low_hp"|"terrain", "hp", "pos", "dir", "biome", ...scenario-specific, "events": [...]}
 
 Scenario-specific fields:
-- walking: terrain_ahead (12 cols), on_ground, have (inventory categories)
+- walking: grid_ahead (16x10 ASCII), on_ground, have (inventory categories), targets
 - combat: enemies, weapons (inv), buffs
 - low_hp: enemies, consumables (inv), buffs
-- terrain: terrain_ahead (16 cols), movement (jump/speed/no_fall_dmg), have
+- terrain: grid_ahead (21x13 ASCII), movement (jump/speed/no_fall_dmg), have
 
-terrain_ahead format: "+N:[y-offsets]" per column. "+1:[0,1]" = solid at feet+0,+1. "+2:air" = gap.
-lava@N / water@N for liquid. Jump ~6 up / ~4 across. Fall >25 tiles = death unless no_fall_dmg.
+grid_ahead: multiline ASCII map. P=player feet column, #=solid, ~=water, !=lava, .=air, ?=unknown.
+Rows go top→bottom (above player → below). Cols go back→forward (back of player → ahead, flipped for dir).
+Walking grid: 3 cols behind + P + 12 cols ahead; 5 rows above + 4 rows below feet.
+Reading: ground under P is row just below P. Gap ahead = "." where "#" should be. Cavern = large "." block
+extending right+down. Fall >25 tiles (no "#" within 25 rows) = death unless no_fall_dmg.
+Jump clears ~6 up / ~4 across. If ahead has drop ≥3 rows × ≥2 cols, reflex already stops walking —
+decide change_direction or emit a detour set_tasks/set_active_goal.
 
 Rules:
 - Return ONLY valid JSON, no markdown, no prose.

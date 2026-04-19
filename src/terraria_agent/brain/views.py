@@ -7,8 +7,6 @@ the system prompt); these views only carry data.
 """
 from __future__ import annotations
 
-from typing import Any
-
 from terraria_agent.models.game_state import GameState
 from terraria_agent.spinal_cord.context import BrainEvent
 
@@ -26,37 +24,44 @@ def _inventory_by_category(gs: GameState, categories: list[str] | None = None) -
     return out
 
 
-def _scan_ahead_text(gs: GameState, columns: int) -> str | None:
+def _tile_grid_text(gs: GameState, back: int = 3, forward: int = 12,
+                    up: int = 5, down: int = 4) -> str | None:
+    """ASCII local grid anchored at player feet. P=player, #=solid,
+    ~=water, !=lava, .=air, ?=unknown. Columns flipped when facing left
+    so forward is always rightward in the rendered grid."""
     tw = gs.tile_window
     if not tw or not tw.rows:
         return None
     p = gs.player
     pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
     feet_y = int((p.pos[1] + p.height) / 16.0)
+    head_y = int(p.pos[1] / 16.0)
     sign = 1 if p.direction == "right" else -1
 
-    lines = []
-    for i in range(1, columns + 1):
-        cx = pcx + sign * i
-        rx = cx - tw.origin[0]
-        solids: list[Any] = []
-        for dy in range(-4, 8):
-            wy = feet_y + dy
-            ry = wy - tw.origin[1]
-            if 0 <= ry < tw.height and 0 <= rx < tw.width:
-                col = 0
-                for run in tw.rows[ry]:
-                    if rx < col + run.count:
-                        if run.solid:
-                            solids.append(dy)
-                        elif run.lava:
-                            solids.append(f"lava@{dy}")
-                        elif run.water:
-                            solids.append(f"water@{dy}")
-                        break
-                    col += run.count
-        lines.append(f"+{i}:{solids}" if solids else f"+{i}:air")
-    return " ".join(lines)
+    lines: list[str] = []
+    for dy in range(-up, down + 1):
+        wy = feet_y + dy
+        row = []
+        for dx in range(-back, forward + 1):
+            wx = pcx + sign * dx
+            if dx == 0 and head_y <= wy <= feet_y:
+                row.append("P")
+                continue
+            t = tw.tile_at(wx, wy)
+            if t is None:
+                row.append("?")
+            elif t.solid:
+                row.append("#")
+            elif t.lava:
+                row.append("!")
+            elif t.water:
+                row.append("~")
+            else:
+                row.append(".")
+        lines.append("".join(row))
+    width = back + forward + 1
+    header = f"grid({width}x{up + down + 1} P=feet col{back}, rows above→below, cols back→forward):"
+    return header + "\n" + "\n".join(lines)
 
 
 def _base(gs: GameState) -> dict:
@@ -102,9 +107,9 @@ def build_view(gs: GameState, events: list[BrainEvent], goal: str, goal_achieved
         view["goal_achieved"] = True
 
     if scenario == "walking":
-        terrain = _scan_ahead_text(gs, columns=12)
-        if terrain:
-            view["terrain_ahead"] = terrain
+        grid = _tile_grid_text(gs, back=3, forward=12, up=5, down=4)
+        if grid:
+            view["grid_ahead"] = grid
         view["on_ground"] = gs.player.velocity[1] == 0.0
         view["have"] = sorted(
             {s.category for s in gs.inventory_slots if not s.is_empty and s.category != "misc"}
@@ -129,9 +134,9 @@ def build_view(gs: GameState, events: list[BrainEvent], goal: str, goal_achieved
         view["buffs"] = list(gs.player.buffs)[:6]
 
     elif scenario == "terrain":
-        terrain = _scan_ahead_text(gs, columns=16)
-        if terrain:
-            view["terrain_ahead"] = terrain
+        grid = _tile_grid_text(gs, back=4, forward=16, up=6, down=6)
+        if grid:
+            view["grid_ahead"] = grid
         view["movement"] = {
             "jump": gs.movement.jump_height,
             "speed": gs.movement.max_run_speed,
