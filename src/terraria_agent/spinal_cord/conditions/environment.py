@@ -72,9 +72,12 @@ class IsCliffEdge(Condition):
         self.ahead = ahead
 
     def check(self, ctx: TickContext) -> bool:
+        from terraria_agent.diag_log import diag
         gs = ctx.game_state
         p = gs.player
-        if p.velocity[1] != 0.0:
+        vy = p.velocity[1]
+        if vy != 0.0:
+            diag("cliff_edge", f"skip airborne vy={vy} pos={p.pos}")
             return False
         if gs.movement.no_fall_dmg:
             fatal = 10_000
@@ -82,6 +85,7 @@ class IsCliffEdge(Condition):
             fatal = self.fatal_depth
         tw = gs.tile_window
         if not tw or not tw.rows:
+            diag("cliff_edge", f"skip no_tile_window pos={p.pos}")
             return False
         pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
         feet_y = int((p.pos[1] + p.height) / 16.0)
@@ -94,18 +98,26 @@ class IsCliffEdge(Condition):
                     return dy
             return 40
 
+        drops = [_drop_depth(pcx + sign * i) for i in range(1, self.ahead + 1)]
+        result = False
         run = 0
-        for i in range(1, self.ahead + 1):
-            d = _drop_depth(pcx + sign * i)
+        for d in drops:
             if d >= fatal:
-                return True
+                result = True
+                break
             if d >= self.drop_tiles:
                 run += 1
                 if run >= self.min_width:
-                    return True
+                    result = True
+                    break
             else:
                 run = 0
-        return False
+        diag(
+            "cliff_edge",
+            f"pos={p.pos} dir={p.direction} pcx={pcx} feet_y={feet_y} "
+            f"drops={drops} fatal={fatal} thresh={self.drop_tiles}x{self.min_width} result={result}",
+        )
+        return result
 
 
 class HasChestNearby(Condition):
