@@ -8,7 +8,7 @@ from typing import Protocol
 from terraria_agent.cerebellum.screen_capture import ScreenCapture
 from terraria_agent.cerebellum.vision import UIVisionDetector
 from terraria_agent.brain.commander import Commander, apply_commander_decision
-from terraria_agent.brain.events import EventBuffer
+from terraria_agent.brain.events import BrainEvent, EventBuffer, Severity
 from terraria_agent.brain.tactician import Tactician, TacticianConfig, apply_decision
 from terraria_agent.hand.arbiter import arbitrate
 from terraria_agent.hand.controller import HandController
@@ -84,7 +84,6 @@ class AgentOrchestrator:
         self._commander_warned = False
         self._task_queue = TaskQueue(goal="idle", task_queue=[])
         self._looted_chests: set[tuple[int, int]] = set()
-        self._active_goal: Goal | None = None
         self._smart_cursor = False
         self._oneshot: Node | None = None
         self._tick_count = 0
@@ -162,7 +161,7 @@ class AgentOrchestrator:
             dt=self._interval,
             smart_cursor=game_state.smart_cursor,
             looted_chests=self._looted_chests,
-            active_goal=self._active_goal,
+            active_goal=self._task_queue.active_goal,
         )
         oneshot = self._oneshot
         self._oneshot = None
@@ -212,7 +211,7 @@ class AgentOrchestrator:
             except Exception:
                 self._bridge.log(f"[tactician] error: {traceback.format_exc(limit=2)}")
 
-        self._active_goal = ctx.active_goal
+        self._task_queue.active_goal = ctx.active_goal
 
         kept, dropped = arbitrate(ctx.action_buffer)
         if dropped:
@@ -229,21 +228,39 @@ class AgentOrchestrator:
         self._publish(game_state, ctx.action_buffer, status.value, branch)
 
     def _evaluate_active_goal(self, game_state: GameState) -> None:
-        goal = self._active_goal
+        goal = self._task_queue.active_goal
         if goal is None:
             return
         target_present = any(o.tile_pos == goal.target_tile for o in game_state.objects)
         if not target_present:
             self._bridge.log(f"[goal] {goal.kind}@{goal.target_tile} completed (target gone)")
-            self._active_goal = None
+            self._task_queue.active_goal = None
+            self._tactician.collect_events([BrainEvent(
+                type="goal_completed",
+                details={"kind": goal.kind, "target_tile": list(goal.target_tile)},
+                severity=Severity.TACTICAL,
+                timestamp=time.time(),
+            )])
             return
         if goal.expired():
             self._bridge.log(f"[goal] {goal.kind}@{goal.target_tile} aborted (ttl)")
-            self._active_goal = None
+            self._task_queue.active_goal = None
+            self._tactician.collect_events([BrainEvent(
+                type="goal_aborted",
+                details={"kind": goal.kind, "target_tile": list(goal.target_tile), "reason": "ttl"},
+                severity=Severity.TACTICAL,
+                timestamp=time.time(),
+            )])
             return
         if goal.exhausted():
             self._bridge.log(f"[goal] {goal.kind}@{goal.target_tile} aborted (attempts>{goal.max_attempts})")
-            self._active_goal = None
+            self._task_queue.active_goal = None
+            self._tactician.collect_events([BrainEvent(
+                type="goal_aborted",
+                details={"kind": goal.kind, "target_tile": list(goal.target_tile), "reason": "attempts"},
+                severity=Severity.TACTICAL,
+                timestamp=time.time(),
+            )])
             return
 
     def _publish(
@@ -330,7 +347,7 @@ class AgentOrchestrator:
             self._inject_goal("chop_tree", text.split(":", 1)[1].strip())
             return
         if lower == "goal_clear":
-            self._active_goal = None
+            self._task_queue.active_goal = None
             self._bridge.log("[cmd] active_goal cleared")
             return
         self._bridge.log(f"[cmd] unknown: {text}")
@@ -342,7 +359,7 @@ class AgentOrchestrator:
         except ValueError:
             self._bridge.log(f"[cmd] goal format: goal_tree: <tx>,<ty>")
             return
-        self._active_goal = Goal(kind=kind, target_tile=(tx, ty))
+        self._task_queue.active_goal = Goal(kind=kind, target_tile=(tx, ty))
         self._bridge.log(f"[cmd] active_goal set: {kind}@({tx},{ty})")
 
     def _add_task(self, body: str) -> None:

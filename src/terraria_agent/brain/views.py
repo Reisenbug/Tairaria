@@ -83,6 +83,16 @@ def _pick_scenario(gs: GameState, events: list[BrainEvent]) -> str:
     return "walking"
 
 
+def _nearby_targets(gs: GameState, max_distance: float = 20.0, limit: int = 6) -> list[dict]:
+    items = [
+        {"type": o.type, "tile": list(o.tile_pos), "d": round(o.distance, 1)}
+        for o in gs.objects
+        if o.type in ("tree", "chest") and o.distance <= max_distance
+    ]
+    items.sort(key=lambda r: r["d"])
+    return items[:limit]
+
+
 def build_view(gs: GameState, events: list[BrainEvent], goal: str, goal_achieved: bool) -> dict:
     scenario = _pick_scenario(gs, events)
     view = _base(gs)
@@ -99,6 +109,9 @@ def build_view(gs: GameState, events: list[BrainEvent], goal: str, goal_achieved
         view["have"] = sorted(
             {s.category for s in gs.inventory_slots if not s.is_empty and s.category != "misc"}
         )
+        targets = _nearby_targets(gs)
+        if targets:
+            view["targets"] = targets
 
     elif scenario == "combat":
         view["enemies"] = [

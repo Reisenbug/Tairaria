@@ -12,6 +12,7 @@ from typing import Any
 from terraria_agent.brain.events import BrainEvent, EventBuffer, Severity
 from terraria_agent.brain.views import build_view
 from terraria_agent.models.game_state import GameState
+from terraria_agent.models.goal import Goal
 from terraria_agent.models.task_queue import Task, TaskPriority, TaskQueue
 
 
@@ -53,13 +54,20 @@ Rules:
 - Default: {"action": "noop"} — BT continues as-is.
 - NEVER include trigger="default" in set_tasks. The baseline walk task is system-managed.
 
-Action schema (you do NOT set goals — commander handles that):
+Action schema (you do NOT set strategic goals — commander handles that):
 - {"action": "noop"}
 - {"action": "change_direction", "direction": "left"|"right"}
 - {"action": "set_tasks", "tasks": [{"trigger": "...", "action": "...", "priority": "baseline"|"high"|"critical"}]}
+- {"action": "set_active_goal", "goal": {"kind": "chop_tree", "target_tile": [tx, ty], "ttl": 10}}
+- {"action": "clear_active_goal"}
 - {"action": "retreat", "reason": "..."}
 - {"action": "use_item", "slot": N}
 - {"action": "select_weapon", "preference": "melee"|"ranged"|"best_dps"}
+
+active_goal pins a fine-grained target across ticks (prevents oscillation).
+Kinds: chop_tree. target_tile is the object's tile_pos from scenario view.
+Set one only when you see a specific target worth committing to. BT already
+handles walking/exploring without a goal.
 """
 
 
@@ -106,6 +114,13 @@ class Tactician:
 
         recent = buffer.recent_at_least(Severity.TACTICAL, limit=10) if buffer else self._pending_events
         view = build_view(gs, recent, task_queue.goal, task_queue.goal_achieved)
+        if task_queue.active_goal is not None:
+            g = task_queue.active_goal
+            view["active_goal"] = {
+                "kind": g.kind,
+                "target_tile": list(g.target_tile),
+                "attempts": g.attempts,
+            }
         self._pending_events.clear()
         user_msg = json.dumps(view, ensure_ascii=False)
         self.last_input = user_msg
@@ -206,6 +221,31 @@ def apply_decision(decision: dict, task_queue: TaskQueue) -> str | None:
 
     if action == "set_goal":
         return "rejected: set_goal is commander-only"
+
+    if action == "set_active_goal":
+        raw = decision.get("goal") or {}
+        try:
+            tt = raw.get("target_tile")
+            if not (isinstance(tt, (list, tuple)) and len(tt) == 2):
+                return "rejected: set_active_goal needs target_tile [tx,ty]"
+            goal = Goal(
+                kind=raw.get("kind", ""),
+                target_tile=(int(tt[0]), int(tt[1])),
+                ttl=float(raw.get("ttl", 10.0)),
+                max_attempts=int(raw.get("max_attempts", 5)),
+                parent_strategic_goal=task_queue.goal,
+            )
+        except (TypeError, ValueError) as e:
+            return f"rejected: set_active_goal parse error: {e}"
+        task_queue.active_goal = goal
+        return f"active_goal ← {goal.kind}@{goal.target_tile}"
+
+    if action == "clear_active_goal":
+        if task_queue.active_goal is None:
+            return None
+        old = task_queue.active_goal
+        task_queue.active_goal = None
+        return f"active_goal cleared ({old.kind}@{old.target_tile})"
 
     if action == "retreat":
         for task in task_queue.task_queue:

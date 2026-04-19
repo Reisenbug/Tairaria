@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class Goal:
+class Goal(BaseModel):
     kind: str
     target_tile: tuple[int, int]
     ttl: float = 10.0
     max_attempts: int = 5
     attempts: int = 0
-    created_at: float = field(default_factory=time.time)
+    created_at: float = Field(default_factory=time.time)
     parent_strategic_goal: str = ""
 
     def expired(self, now: float | None = None) -> bool:
