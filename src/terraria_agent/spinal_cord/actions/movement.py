@@ -44,12 +44,11 @@ class PlacePlatform(Action):
 class BuildBridge(Action):
     """EXCLUSIVE task: walk forward while holding place-key with SmartCursor on.
     Terraria auto-selects the reachable empty tile in facing direction.
-    Completes when terrain_ahead leaves PIT."""
+    Completes when IsCliffEdge clears (can walk safely again)."""
 
     def execute(self, ctx: TickContext) -> Status:
-        from terraria_agent.models.game_state import TerrainType
-
-        if ctx.game_state.terrain_ahead != TerrainType.PIT:
+        from terraria_agent.spinal_cord.conditions.environment import IsCliffEdge
+        if not IsCliffEdge().check(ctx):
             return Status.SUCCESS
 
         platform_slot = next(

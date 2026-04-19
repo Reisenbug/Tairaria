@@ -129,6 +129,10 @@ class Tactician:
         self._pending_events.clear()
         user_msg = json.dumps(view, ensure_ascii=False)
         self.last_input = user_msg
+        from terraria_agent.diag_log import diag
+        diag("tactician_input", user_msg)
+        if "grid_ahead" in view:
+            diag("tactician_grid", f"scenario={view.get('scenario')} dir={view.get('dir')}\n{view['grid_ahead']}")
 
         self._inflight = threading.Thread(
             target=self._run_chat, args=(user_msg,), name="TacticianCall", daemon=True,
@@ -137,16 +141,19 @@ class Tactician:
         return True
 
     def _run_chat(self, user_msg: str) -> None:
+        from terraria_agent.diag_log import diag
         try:
             result, raw = self._chat(user_msg)
             with self._lock:
                 self.last_output = raw
                 self._ready_decision = result
                 self._last_call = time.monotonic()
+            diag("tactician_output", raw)
         except Exception as e:
             with self._lock:
                 self.last_output = f"ERROR: {e}"
                 self._last_call = time.monotonic()
+            diag("tactician_output", f"ERROR: {e}")
 
     def poll_decision(self) -> dict | None:
         with self._lock:
