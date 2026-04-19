@@ -58,64 +58,85 @@ class HasTreeNearby(Condition):
 
 
 class IsCliffEdge(Condition):
-    """Ahead terrain drops dangerously. FAIL walking to stop bot.
-    Fires only when on ground. Returns True if within the next 2 tiles the
-    ground falls >= drop_tiles deep across >= min_width contiguous columns,
-    OR any pit in that window is >= fatal_depth deep (fall damage)."""
+    """Ahead terrain is un-jumpable. FAIL walking to stop bot.
+    Two stop conditions:
+      1. Gap (no-solid column with drop>jump_recover) wider than jump_reach.
+      2. Cumulative ground descent over lookahead >= fatal_depth (slope trap).
+    On-ground only."""
 
-    def __init__(self, drop_tiles: int = 3, min_width: int = 2,
-                 fatal_depth: int = 25, ahead: int = 2, name: str = ""):
+    def __init__(self, lookahead: int = 15, jump_reach: int = 5,
+                 jump_recover: int = 6, fatal_depth: int = 25, name: str = ""):
         super().__init__(name)
-        self.drop_tiles = drop_tiles
-        self.min_width = min_width
+        self.lookahead = lookahead
+        self.jump_reach = jump_reach
+        self.jump_recover = jump_recover
         self.fatal_depth = fatal_depth
-        self.ahead = ahead
 
     def check(self, ctx: TickContext) -> bool:
         from terraria_agent.diag_log import diag
         gs = ctx.game_state
         p = gs.player
-        vy = p.velocity[1]
-        if vy != 0.0:
-            diag("cliff_edge", f"skip airborne vy={vy} pos={p.pos}")
+        if p.velocity[1] != 0.0:
+            diag("cliff_edge", f"skip airborne vy={p.velocity[1]} pos={p.pos}")
             return False
-        if gs.movement.no_fall_dmg:
-            fatal = 10_000
-        else:
-            fatal = self.fatal_depth
         tw = gs.tile_window
         if not tw or not tw.rows:
             diag("cliff_edge", f"skip no_tile_window pos={p.pos}")
             return False
+        fatal = 10_000 if gs.movement.no_fall_dmg else self.fatal_depth
         pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
         feet_y = int((p.pos[1] + p.height) / 16.0)
         sign = 1 if p.direction == "right" else -1
 
-        def _drop_depth(cx: int) -> int:
-            for dy in range(0, 40):
-                t = tw.tile_at(cx, feet_y + dy)
+        def _ground_drop(cx: int, from_y: int) -> int:
+            for dy in range(0, 60):
+                t = tw.tile_at(cx, from_y + dy)
                 if t is not None and t.solid:
                     return dy
-            return 40
+            return 60
 
-        drops = [_drop_depth(pcx + sign * i) for i in range(1, self.ahead + 1)]
-        result = False
-        run = 0
-        for d in drops:
-            if d >= fatal:
-                result = True
-                break
-            if d >= self.drop_tiles:
-                run += 1
-                if run >= self.min_width:
-                    result = True
+        gap_start = None
+        gap_width = 0
+        ground_y = feet_y
+        max_cum = 0
+        drops_log: list[int] = []
+        reason = None
+
+        for i in range(1, self.lookahead + 1):
+            cx = pcx + sign * i
+            d = _ground_drop(cx, ground_y)
+            drops_log.append(d)
+            if d >= self.fatal_depth:
+                gap_width += 1
+                if gap_start is None:
+                    gap_start = i
+                if gap_width > self.jump_reach:
+                    reason = f"gap_wide_at_i{i}"
+                    break
+            elif d > self.jump_recover:
+                gap_width += 1
+                if gap_start is None:
+                    gap_start = i
+                if gap_width > self.jump_reach:
+                    reason = f"gap_wide_at_i{i}"
                     break
             else:
-                run = 0
+                gap_start = None
+                gap_width = 0
+                ground_y = ground_y + d
+                cum = ground_y - feet_y
+                if cum > max_cum:
+                    max_cum = cum
+                if cum >= fatal:
+                    reason = f"slope_drop_cum{cum}"
+                    break
+
+        result = reason is not None
         diag(
             "cliff_edge",
             f"pos={p.pos} dir={p.direction} pcx={pcx} feet_y={feet_y} "
-            f"drops={drops} fatal={fatal} thresh={self.drop_tiles}x{self.min_width} result={result}",
+            f"drops={drops_log} max_cum={max_cum} fatal={fatal} "
+            f"jump_reach={self.jump_reach} reason={reason} result={result}",
         )
         return result
 
