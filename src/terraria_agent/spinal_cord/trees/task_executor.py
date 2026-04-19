@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Callable
 from terraria_agent.spinal_cord.bt import Parallel, Sequence
 from terraria_agent.spinal_cord.bt.core import Node, Status
 from terraria_agent.spinal_cord.bt.leaves import Condition
+from terraria_agent.spinal_cord.bt.decorators import Inverter
+from terraria_agent.spinal_cord.conditions.environment import IsCliffEdge
 from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveRight, MoveToObject, BuildBridge
 from terraria_agent.spinal_cord.actions.interaction import (
     ShakeTree, ChopBigTree, BigTreeChopped, PickUpValuableDrop,
@@ -113,13 +115,25 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
             name="Task_build_bridge",
         )
     elif trigger == "default" and action == "move_right":
-        return Parallel(
-            children=[MoveRight(name="WalkRight"), ShakeTree(name="ShakeTree")],
-            success_threshold=2,
+        return Sequence(
+            children=[
+                Inverter(IsCliffEdge(name="CliffEdgeAhead"), name="NotCliffEdge"),
+                Parallel(
+                    children=[MoveRight(name="WalkRight"), ShakeTree(name="ShakeTree")],
+                    success_threshold=2,
+                    name="Walk_shake",
+                ),
+            ],
             name="Task_walk_shake",
         )
     elif trigger == "default":
-        return MoveLeft(name="Task_default_move_left")
+        return Sequence(
+            children=[
+                Inverter(IsCliffEdge(name="CliffEdgeAhead"), name="NotCliffEdge"),
+                MoveLeft(name="WalkLeft"),
+            ],
+            name="Task_default_move_left",
+        )
     return None
 
 

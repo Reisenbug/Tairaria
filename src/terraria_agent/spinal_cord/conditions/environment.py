@@ -57,6 +57,57 @@ class HasTreeNearby(Condition):
         )
 
 
+class IsCliffEdge(Condition):
+    """Ahead terrain drops dangerously. FAIL walking to stop bot.
+    Fires only when on ground. Returns True if within the next 2 tiles the
+    ground falls >= drop_tiles deep across >= min_width contiguous columns,
+    OR any pit in that window is >= fatal_depth deep (fall damage)."""
+
+    def __init__(self, drop_tiles: int = 3, min_width: int = 2,
+                 fatal_depth: int = 25, ahead: int = 2, name: str = ""):
+        super().__init__(name)
+        self.drop_tiles = drop_tiles
+        self.min_width = min_width
+        self.fatal_depth = fatal_depth
+        self.ahead = ahead
+
+    def check(self, ctx: TickContext) -> bool:
+        gs = ctx.game_state
+        p = gs.player
+        if p.velocity[1] != 0.0:
+            return False
+        if gs.movement.no_fall_dmg:
+            fatal = 10_000
+        else:
+            fatal = self.fatal_depth
+        tw = gs.tile_window
+        if not tw or not tw.rows:
+            return False
+        pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
+        feet_y = int((p.pos[1] + p.height) / 16.0)
+        sign = 1 if p.direction == "right" else -1
+
+        def _drop_depth(cx: int) -> int:
+            for dy in range(0, 40):
+                t = tw.tile_at(cx, feet_y + dy)
+                if t is not None and t.solid:
+                    return dy
+            return 40
+
+        run = 0
+        for i in range(1, self.ahead + 1):
+            d = _drop_depth(pcx + sign * i)
+            if d >= fatal:
+                return True
+            if d >= self.drop_tiles:
+                run += 1
+                if run >= self.min_width:
+                    return True
+            else:
+                run = 0
+        return False
+
+
 class HasChestNearby(Condition):
     """Chebyshev gap between player AABB and chest AABB in tiles (<= max_gap)."""
 
