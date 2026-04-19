@@ -17,6 +17,7 @@ from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.hud.state_bridge import HUDSnapshot, StateBridge
 from terraria_agent.models.actions import GameAction
 from terraria_agent.models.game_state import GameState, Player
+from terraria_agent.models.goal import Goal
 from terraria_agent.models.task_queue import Task, TaskPriority, TaskQueue
 from terraria_agent.spinal_cord.actions.movement import MineForward
 from terraria_agent.spinal_cord.bt.core import Node, Status
@@ -83,6 +84,7 @@ class AgentOrchestrator:
         self._commander_warned = False
         self._task_queue = TaskQueue(goal="idle", task_queue=[])
         self._looted_chests: set[tuple[int, int]] = set()
+        self._active_goal: Goal | None = None
         self._smart_cursor = False
         self._oneshot: Node | None = None
         self._tick_count = 0
@@ -153,12 +155,14 @@ class AgentOrchestrator:
             tq.goal_achieved = True
             self._bridge.log(f"[goal] reached biome={tq.stop_biome} — continuing")
 
+        self._evaluate_active_goal(game_state)
         ctx = TickContext(
             game_state=game_state,
             task_queue=self._task_queue,
             dt=self._interval,
             smart_cursor=game_state.smart_cursor,
             looted_chests=self._looted_chests,
+            active_goal=self._active_goal,
         )
         oneshot = self._oneshot
         self._oneshot = None
@@ -208,6 +212,8 @@ class AgentOrchestrator:
             except Exception:
                 self._bridge.log(f"[tactician] error: {traceback.format_exc(limit=2)}")
 
+        self._active_goal = ctx.active_goal
+
         kept, dropped = arbitrate(ctx.action_buffer)
         if dropped:
             reasons = ", ".join(f"{a.action.value}×{r.value}" for a, r in dropped)
@@ -221,6 +227,24 @@ class AgentOrchestrator:
 
         branch = " > ".join(ctx.bt_trace) if ctx.bt_trace else "Root"
         self._publish(game_state, ctx.action_buffer, status.value, branch)
+
+    def _evaluate_active_goal(self, game_state: GameState) -> None:
+        goal = self._active_goal
+        if goal is None:
+            return
+        target_present = any(o.tile_pos == goal.target_tile for o in game_state.objects)
+        if not target_present:
+            self._bridge.log(f"[goal] {goal.kind}@{goal.target_tile} completed (target gone)")
+            self._active_goal = None
+            return
+        if goal.expired():
+            self._bridge.log(f"[goal] {goal.kind}@{goal.target_tile} aborted (ttl)")
+            self._active_goal = None
+            return
+        if goal.exhausted():
+            self._bridge.log(f"[goal] {goal.kind}@{goal.target_tile} aborted (attempts>{goal.max_attempts})")
+            self._active_goal = None
+            return
 
     def _publish(
         self,
@@ -302,7 +326,24 @@ class AgentOrchestrator:
         if lower.startswith("task:"):
             self._add_task(text.split(":", 1)[1].strip())
             return
+        if lower.startswith("goal_tree:"):
+            self._inject_goal("chop_tree", text.split(":", 1)[1].strip())
+            return
+        if lower == "goal_clear":
+            self._active_goal = None
+            self._bridge.log("[cmd] active_goal cleared")
+            return
         self._bridge.log(f"[cmd] unknown: {text}")
+
+    def _inject_goal(self, kind: str, body: str) -> None:
+        try:
+            tx_str, ty_str = body.split(",", 1)
+            tx, ty = int(tx_str.strip()), int(ty_str.strip())
+        except ValueError:
+            self._bridge.log(f"[cmd] goal format: goal_tree: <tx>,<ty>")
+            return
+        self._active_goal = Goal(kind=kind, target_tile=(tx, ty))
+        self._bridge.log(f"[cmd] active_goal set: {kind}@({tx},{ty})")
 
     def _add_task(self, body: str) -> None:
         parts = body.split()

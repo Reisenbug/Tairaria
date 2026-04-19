@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 
 from terraria_agent.brain.events import BrainEvent, classify
 from terraria_agent.models.actions import GameAction
-from terraria_agent.models.game_state import GameState
+from terraria_agent.models.game_state import CombatMode, GameState
+from terraria_agent.models.goal import Goal
 from terraria_agent.models.task_queue import TaskQueue
 
 __all__ = ["BrainEvent", "TickContext"]
@@ -24,6 +25,8 @@ class TickContext:
     smart_cursor: bool = False
     exclusive_active: bool = False
     looted_chests: set = field(default_factory=set)
+    combat_mode: CombatMode = CombatMode.CAUTIOUS
+    active_goal: Goal | None = None
 
     def report(self, event_type: str, **details) -> None:
         self.brain_events.append(BrainEvent(

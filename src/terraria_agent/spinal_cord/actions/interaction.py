@@ -71,12 +71,22 @@ class ChopBigTree(Action):
         big_trees = [t for t in trees if _tree_height(ctx, t) >= _BIG_TREE_HEIGHT]
         if not big_trees:
             return Status.FAILURE
-        nearest = min(big_trees, key=lambda o: o.distance)
-        if nearest.distance > 4.0:
+        target = None
+        if ctx.active_goal and ctx.active_goal.kind == "chop_tree":
+            tt = ctx.active_goal.target_tile
+            for t in big_trees:
+                if t.tile_pos == tt:
+                    target = t
+                    break
+        if target is None:
+            target = min(big_trees, key=lambda o: o.distance)
+        if target.distance > 5.0:
+            if ctx.active_goal and ctx.active_goal.kind == "chop_tree":
+                ctx.active_goal.attempts += 1
             return Status.FAILURE
         if not _ensure_axe(ctx):
             return Status.FAILURE
-        screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
+        screen_xy = world_to_screen(target.pos, ctx.game_state.camera)
         ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
         ctx.bt_trace.append(f"ChopBig({_big_trees_chopped}/{_BIG_TREE_LIMIT})")
         return Status.RUNNING

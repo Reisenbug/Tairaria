@@ -171,10 +171,19 @@ class MoveToObject(Action):
         targets = [o for o in ctx.game_state.objects if o.type == self.object_type]
         if not targets:
             return Status.FAILURE
-        nearest = min(targets, key=lambda o: o.distance)
-        if nearest.distance <= self.reach_tiles:
+        target = None
+        if ctx.active_goal is not None:
+            tt = ctx.active_goal.target_tile
+            for o in targets:
+                if o.tile_pos == tt:
+                    target = o
+                    break
+        if target is None:
+            target = min(targets, key=lambda o: o.distance)
+        if target.distance <= self.reach_tiles:
             return Status.SUCCESS
-        player_x = ctx.game_state.player.pos[0]
-        direction = "right" if nearest.pos[0] > player_x else "left"
+        player = ctx.game_state.player
+        player_cx = player.pos[0] + player.width / 2.0
+        direction = "right" if target.pos[0] > player_cx else "left"
         _emit_move(ctx, direction)
         return Status.RUNNING
