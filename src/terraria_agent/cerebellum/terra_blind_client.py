@@ -25,6 +25,22 @@ _THREAT_OVERRIDES: dict[int, EnemyThreat] = {
     204: EnemyThreat.DANGEROUS,  # Spiked Jungle Slime
 }
 
+_MEDIUM_HP_THRESHOLD = 50
+_DANGEROUS_HP_THRESHOLD = 150
+
+
+def _classify_threat(type_id: int, max_hp: int, boss: bool) -> EnemyThreat:
+    if boss:
+        return EnemyThreat.BOSS
+    override = _THREAT_OVERRIDES.get(type_id)
+    if override is not None:
+        return override
+    if max_hp >= _DANGEROUS_HP_THRESHOLD:
+        return EnemyThreat.DANGEROUS
+    if max_hp >= _MEDIUM_HP_THRESHOLD:
+        return EnemyThreat.MEDIUM
+    return EnemyThreat.WEAK
+
 
 _NO_PROXY_HANDLER = urllib.request.ProxyHandler({})
 _OPENER = urllib.request.build_opener(_NO_PROXY_HANDLER)
@@ -295,14 +311,7 @@ class TerraBlindClient:
             max_hp_e = max(int(e.get("max_hp", 1)), 1)
             boss = bool(e.get("boss", False))
             type_id = int(e.get("type", 0))
-            threat = (
-                EnemyThreat.BOSS if boss else
-                _THREAT_OVERRIDES.get(type_id) or (
-                    EnemyThreat.DANGEROUS if dist < 8 else
-                    EnemyThreat.MEDIUM if dist < 20 else
-                    EnemyThreat.WEAK
-                )
-            )
+            threat = _classify_threat(type_id, max_hp_e, boss)
             enemies.append(Enemy(
                 who=int(e.get("who", -1)),
                 type_id=type_id,

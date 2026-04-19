@@ -15,6 +15,10 @@ class AttackNearest(Action):
     def execute(self, ctx: TickContext) -> Status:
         if not ctx.game_state.enemies:
             return Status.FAILURE
+        cur_slot = ctx.game_state.player.selected_slot
+        held = next((s for s in ctx.game_state.inventory_slots[:10] if s.slot_index == cur_slot), None)
+        if held is None or not held.is_weapon:
+            return Status.FAILURE
         nearest = min(ctx.game_state.enemies, key=lambda e: e.distance)
         screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
         ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
@@ -50,3 +54,22 @@ class Dodge(Action):
         ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction=dodge_dir))
         ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
         return Status.SUCCESS
+
+
+class JumpOverEnemy(Action):
+    def execute(self, ctx: TickContext) -> Status:
+        ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
+        return Status.SUCCESS
+
+
+class EnsureWeaponSlot(Action):
+    def execute(self, ctx: TickContext) -> Status:
+        cur = ctx.game_state.player.selected_slot
+        held = next((s for s in ctx.game_state.inventory_slots[:10] if s.slot_index == cur), None)
+        if held is not None and held.is_weapon:
+            return Status.SUCCESS
+        weapon = next((s for s in ctx.game_state.inventory_slots[:10] if s.is_weapon), None)
+        if weapon is None:
+            return Status.FAILURE
+        ctx.action_buffer.append(GameAction(action=ActionType.SWITCH_SLOT, slot=weapon.slot_index))
+        return Status.RUNNING

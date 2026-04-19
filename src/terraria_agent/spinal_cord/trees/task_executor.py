@@ -77,7 +77,7 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
         return Sequence(
             children=[
                 TriggerCondition(TRIGGER_REGISTRY["big_tree_nearby"], name="HasBigTree"),
-                MoveToObject("tree", reach_tiles=4.0),
+                MoveToObject("tree", reach_tiles=3.0),
                 ChopBigTree(),
                 BigTreeChopped(),
                 PickUpValuableDrop(),

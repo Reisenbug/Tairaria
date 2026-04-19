@@ -1,13 +1,13 @@
-from terraria_agent.spinal_cord.bt import Sequence, Selector, Parallel
+from terraria_agent.spinal_cord.bt import PrioritySelector, Sequence
 from terraria_agent.spinal_cord.conditions.combat import (
-    HasEnemiesNearby, IsSurrounded, EnemyIsWeak, EnemyIsMedium, EnemyIsDangerous, HasUrgentThreat,
+    HasUrgentThreat, IsEnemyBlockingPath, ShouldEngage,
 )
-from terraria_agent.spinal_cord.actions.combat import AttackNearest, SwitchToSword, SwitchToBestWeapon, Dodge
-from terraria_agent.spinal_cord.actions.movement import MoveLeft
+from terraria_agent.spinal_cord.actions.combat import (
+    AttackNearest, Dodge, EnsureWeaponSlot, JumpOverEnemy,
+)
 
 
 def build_threat_response_tree():
-    """Urgent projectile/threat → dodge."""
     return Sequence(
         children=[HasUrgentThreat(), Dodge()],
         name="ThreatResponse",
@@ -15,11 +15,22 @@ def build_threat_response_tree():
 
 
 def build_combat_tree():
-    """Handle enemies by threat level — weapon selection is Brain's job."""
-    return Sequence(
+    engage = Sequence(
         children=[
-            HasEnemiesNearby(max_distance=400.0),
+            ShouldEngage(max_distance=25.0),
+            EnsureWeaponSlot(),
             AttackNearest(),
         ],
+        name="Engage",
+    )
+    avoid = Sequence(
+        children=[
+            IsEnemyBlockingPath(max_distance=4.0),
+            JumpOverEnemy(),
+        ],
+        name="AvoidWeak",
+    )
+    return PrioritySelector(
+        children=[engage, avoid],
         name="Combat",
     )

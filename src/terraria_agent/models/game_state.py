@@ -13,6 +13,13 @@ class EnemyThreat(str, Enum):
     BOSS = "boss"
 
 
+class CombatMode(str, Enum):
+    AGGRESSIVE = "aggressive"
+    CAUTIOUS = "cautious"
+    PACIFIST = "pacifist"
+    RETREAT = "retreat"
+
+
 class TerrainType(str, Enum):
     FLAT = "flat"
     PIT = "pit"
