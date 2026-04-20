@@ -183,7 +183,7 @@ class IsCaveEntrance(Condition):
 
 
 class HasChestNearby(Condition):
-    """Chebyshev gap between player AABB and chest AABB in tiles (<= max_gap)."""
+    """Chebyshev gap between player AABB (expanded by max_gap on each side) and any unlooted chest."""
 
     def __init__(self, max_gap: int = 3, name: str = ""):
         super().__init__(name)
@@ -198,7 +198,7 @@ class HasChestNearby(Condition):
         p_x1, p_x2 = px, px + pw - 1
         p_y1, p_y2 = py, py + ph - 1
         for o in ctx.game_state.objects:
-            if o.type != "chest":
+            if o.type != "chest" or o.tile_pos in ctx.looted_chests:
                 continue
             cx, cy = o.tile_pos
             c_x1, c_x2 = cx, cx + 1

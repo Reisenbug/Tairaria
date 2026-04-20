@@ -7,7 +7,7 @@ from terraria_agent.spinal_cord.bt import Parallel, Selector, Sequence
 from terraria_agent.spinal_cord.bt.core import Node, Status
 from terraria_agent.spinal_cord.bt.leaves import Condition
 from terraria_agent.spinal_cord.bt.decorators import ForceSuccess
-from terraria_agent.spinal_cord.conditions.environment import IsCliffEdge, IsCaveEntrance
+from terraria_agent.spinal_cord.conditions.environment import IsCliffEdge, IsCaveEntrance, HasChestNearby
 from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveRight, MoveToObject, BuildBridge, JumpOverCave
 from terraria_agent.spinal_cord.actions.interaction import (
     ShakeTree, ChopBigTree, BigTreeChopped, PickUpValuableDrop,
@@ -33,14 +33,11 @@ class TriggerCondition(Condition):
         return self._predicate(ctx)
 
 
+_chest_adjacent = HasChestNearby(max_gap=3).check
+
+
 TRIGGER_REGISTRY: dict[str, Callable[[TickContext], bool]] = {
-    "chest_nearby": lambda ctx: any(
-        o.type == "chest"
-        and o.tile_pos not in ctx.looted_chests
-        and o.distance <= 8.0
-        and abs(o.pos[1] - ctx.game_state.player.pos[1]) < 6 * 16
-        for o in ctx.game_state.objects
-    ),
+    "chest_nearby": _chest_adjacent,
     "wood_gte_10": lambda ctx: ctx.game_state.inventory.get("wood", 0) >= 10,
     "default": lambda ctx: True,
 }
