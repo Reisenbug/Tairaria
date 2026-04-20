@@ -153,11 +153,13 @@ class PillarJump(Action):
         dx = 1 if sign > 0 else -2
 
         if not self._place_started:
+            if ctx.game_state.smart_cursor:
+                ctx.action_buffer.append(GameAction(action=ActionType.KEY_PRESS, item="smart_cursor"))
+                return Status.RUNNING
             ctx.action_buffer.append(GameAction(
                 action=ActionType.PLACE,
                 dx=dx, dy=1, slot=platform_slot,
                 duration_frames=self.budget_ticks * 12,
-                smart_cursor=False,
             ))
             self._place_started = True
 

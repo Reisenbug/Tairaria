@@ -58,7 +58,6 @@ class ModController:
                         self._http_post_json(_PLACE_URL, {
                             "dx": int(a.dx), "dy": int(a.dy), "slot": int(a.slot),
                             "duration_frames": int(a.duration_frames),
-                            "smart_cursor": bool(a.smart_cursor) if a.smart_cursor is not None else False,
                         })
                 case ActionType.PLACE_STOP:
                     self._http_fire(_PLACE_STOP_URL)
