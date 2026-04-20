@@ -61,6 +61,17 @@ def _build_goal_subtree(goal_kind: str) -> Node | None:
             ],
             name="Goal_chop_tree",
         )
+    if goal_kind == "open_chest":
+        return Sequence(
+            children=[
+                MoveToObject("chest", reach_tiles=3.0),
+                EnsureSmartCursorOn(),
+                OpenChest(),
+                LootAll(),
+                MarkChestLooted(),
+            ],
+            name="Goal_open_chest",
+        )
     return None
 
 

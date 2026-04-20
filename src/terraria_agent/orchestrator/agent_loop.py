@@ -231,6 +231,16 @@ class AgentOrchestrator:
         goal = self._task_queue.active_goal
         if goal is None:
             return
+        if goal.kind == "open_chest" and goal.target_tile in self._looted_chests:
+            self._bridge.log(f"[goal] open_chest@{goal.target_tile} completed (looted)")
+            self._task_queue.active_goal = None
+            self._tactician.collect_events([BrainEvent(
+                type="goal_completed",
+                details={"kind": goal.kind, "target_tile": list(goal.target_tile)},
+                severity=Severity.TACTICAL,
+                timestamp=time.time(),
+            )])
+            return
         target_present = any(o.tile_pos == goal.target_tile for o in game_state.objects)
         if not target_present:
             self._bridge.log(f"[goal] {goal.kind}@{goal.target_tile} completed (target gone)")

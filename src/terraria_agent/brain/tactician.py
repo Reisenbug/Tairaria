@@ -70,11 +70,12 @@ Action schema (you do NOT set strategic goals — commander handles that):
 - {"action": "select_weapon", "preference": "melee"|"ranged"|"best_dps"}
 
 active_goal pins a fine-grained target across ticks (prevents oscillation) AND is
-the ONLY way to trigger object-focused behavior now (BT no longer auto-triggers).
-Kinds: chop_tree. target_tile is the object's tile_pos from walking-scenario targets[].
-When `targets` contains a tree and you want it chopped → emit set_active_goal(chop_tree, target_tile).
-BT will then MoveToObject → ChopBigTree → pickup automatically. Without a goal,
-BT only walks + reflexes — it will walk past trees.
+the ONLY way to trigger object-focused behavior for detours.
+Kinds: chop_tree, open_chest. target_tile is the object's tile_pos from walking-scenario targets[].
+- chop_tree: emit when targets[] has a tree worth chopping. BT runs MoveToObject → ChopBigTree → pickup.
+- open_chest: emit ONLY when the chest is off-path (distance > 3 tiles / requires detour). Adjacent
+  chests are already looted by a reflex — no goal needed. BT runs MoveToObject → OpenChest → LootAll.
+Without a goal, BT only walks + reflexes — walks past far trees/chests unless you commit.
 """
 
 
