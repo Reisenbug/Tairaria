@@ -8,7 +8,7 @@ from terraria_agent.spinal_cord.bt.core import Node, Status
 from terraria_agent.spinal_cord.bt.leaves import Condition
 from terraria_agent.spinal_cord.bt.decorators import ForceSuccess
 from terraria_agent.spinal_cord.conditions.environment import IsCliffEdge, IsCaveEntrance, HasChestNearby
-from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveRight, MoveToObject, BuildBridge, JumpOverCave
+from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveRight, MoveToObject, BuildBridge, JumpOverCave, PillarJump
 from terraria_agent.spinal_cord.actions.interaction import (
     ShakeTree, ChopBigTree, BigTreeChopped, PickUpValuableDrop,
     OpenChest, EnsureSmartCursorOn, LootAll, MarkChestLooted,
@@ -102,7 +102,13 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
                 Sequence(
                     children=[
                         IsCaveEntrance(name="CaveEntranceAhead"),
-                        JumpOverCave(name="SkirtCave"),
+                        Selector(
+                            children=[
+                                JumpOverCave(name="SkirtCave"),
+                                PillarJump(name="PillarJumpFallback"),
+                            ],
+                            name="SkirtOrPillar",
+                        ),
                     ],
                     name="CaveSkirt",
                 ),
@@ -127,7 +133,13 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
                 Sequence(
                     children=[
                         IsCaveEntrance(name="CaveEntranceAhead"),
-                        JumpOverCave(name="SkirtCave"),
+                        Selector(
+                            children=[
+                                JumpOverCave(name="SkirtCave"),
+                                PillarJump(name="PillarJumpFallback"),
+                            ],
+                            name="SkirtOrPillar",
+                        ),
                     ],
                     name="CaveSkirt",
                 ),

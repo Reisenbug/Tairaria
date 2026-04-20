@@ -13,6 +13,8 @@ class ActionType(str, Enum):
     USE_ITEM = "use_item"
     SWITCH_SLOT = "switch_slot"
     PLACE_BLOCK = "place_block"
+    PLACE = "place"
+    PLACE_STOP = "place_stop"
     INTERACT = "interact"
     CRAFT = "craft"
     PICK_UP = "pick_up"
@@ -30,6 +32,10 @@ class GameAction(BaseModel):
     slot: Optional[int] = None
     item: Optional[str] = None
     quantity: Optional[int] = None
+    dx: Optional[int] = None
+    dy: Optional[int] = None
+    duration_frames: Optional[int] = None
+    smart_cursor: Optional[bool] = None
 
 
 class ActionBundle(BaseModel):

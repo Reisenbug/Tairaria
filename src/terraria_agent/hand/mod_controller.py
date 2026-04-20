@@ -18,6 +18,8 @@ _OPENER = urllib.request.build_opener(_NO_PROXY_HANDLER)
 _QUICK_HEAL_URL = "http://127.0.0.1:17878/quick_heal"
 _LOOT_ALL_URL = "http://127.0.0.1:17878/loot_all"
 _INTERACT_URL = "http://127.0.0.1:17878/interact"
+_PLACE_URL = "http://127.0.0.1:17878/place"
+_PLACE_STOP_URL = "http://127.0.0.1:17878/place_stop"
 
 
 class ModController:
@@ -51,6 +53,15 @@ class ModController:
                 case ActionType.INTERACT:
                     if a.tile is not None:
                         self._http_post_json(_INTERACT_URL, {"tile_x": int(a.tile[0]), "tile_y": int(a.tile[1])})
+                case ActionType.PLACE:
+                    if a.dx is not None and a.dy is not None and a.slot is not None and a.duration_frames is not None:
+                        self._http_post_json(_PLACE_URL, {
+                            "dx": int(a.dx), "dy": int(a.dy), "slot": int(a.slot),
+                            "duration_frames": int(a.duration_frames),
+                            "smart_cursor": bool(a.smart_cursor) if a.smart_cursor is not None else False,
+                        })
+                case ActionType.PLACE_STOP:
+                    self._http_fire(_PLACE_STOP_URL)
                 case ActionType.KEY_PRESS:
                     if a.item == "smart_cursor":
                         pyautogui.press("ctrl")

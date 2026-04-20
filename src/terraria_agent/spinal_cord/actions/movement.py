@@ -122,6 +122,69 @@ class JumpOverCave(Action):
         self._stuck_ticks = 0
 
 
+class PillarJump(Action):
+    """Rise N tiles by jumping + holding platform-place below feet.
+    Starts a /place hold (cursor anchored to tile below-front of feet), then
+    emits JUMP edges until N tiles gained or budget exhausted. Always issues
+    /place_stop on exit. Requires platform in hotbar."""
+
+    def __init__(self, target_rise: int = 3, budget_ticks: int = 40, name: str = ""):
+        super().__init__(name)
+        self.target_rise = target_rise
+        self.budget_ticks = budget_ticks
+        self._start_y: float | None = None
+        self._ticks = 0
+        self._place_started = False
+
+    def execute(self, ctx: TickContext) -> Status:
+        p = ctx.game_state.player
+        platform_slot = next(
+            (s.slot_index for s in ctx.game_state.inventory_slots[:10] if s.is_platform),
+            None,
+        )
+        if platform_slot is None:
+            return self._finish(ctx, Status.FAILURE)
+
+        if self._start_y is None:
+            self._start_y = p.pos[1]
+        self._ticks += 1
+
+        sign = 1 if p.direction == "right" else -1
+        dx = 1 if sign > 0 else -2
+
+        if not self._place_started:
+            ctx.action_buffer.append(GameAction(
+                action=ActionType.PLACE,
+                dx=dx, dy=1, slot=platform_slot,
+                duration_frames=self.budget_ticks * 12,
+                smart_cursor=False,
+            ))
+            self._place_started = True
+
+        on_ground = abs(p.velocity[1]) <= 0.5
+        if on_ground:
+            ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
+
+        rise = (self._start_y - p.pos[1]) / 16.0
+        ctx.bt_trace.append(f"PillarJump(rise={rise:.1f}/{self.target_rise})")
+        if rise >= self.target_rise:
+            return self._finish(ctx, Status.SUCCESS)
+        if self._ticks >= self.budget_ticks:
+            return self._finish(ctx, Status.FAILURE)
+        return Status.RUNNING
+
+    def _finish(self, ctx: TickContext, status: Status) -> Status:
+        if self._place_started:
+            ctx.action_buffer.append(GameAction(action=ActionType.PLACE_STOP))
+        self.reset()
+        return status
+
+    def reset(self) -> None:
+        self._start_y = None
+        self._ticks = 0
+        self._place_started = False
+
+
 class Swim(Action):
     def execute(self, ctx: TickContext) -> Status:
         direction = ctx.game_state.player.direction
