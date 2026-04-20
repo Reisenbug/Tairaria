@@ -73,6 +73,55 @@ class BuildBridge(Action):
         return Status.RUNNING
 
 
+class JumpOverCave(Action):
+    """Skirt cave entrance: jump + keep walking forward.
+    Relies on mod auto-jump to climb overhang. FAILURE if still on ground
+    and not moving after a few ticks (= overhang too high → bot stops)."""
+
+    def __init__(self, stuck_limit: int = 6, name: str = ""):
+        super().__init__(name)
+        self.stuck_limit = stuck_limit
+        self._stuck_ticks = 0
+
+    def execute(self, ctx: TickContext) -> Status:
+        p = ctx.game_state.player
+        direction = p.direction
+        ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction=direction))
+        if self._head_clear(ctx):
+            ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
+            ctx.bt_trace.append(f"JumpOverCave({direction},jump)")
+        else:
+            ctx.bt_trace.append(f"JumpOverCave({direction},blocked)")
+        on_ground = abs(p.velocity[1]) <= 0.5
+        moving = abs(p.velocity[0]) > 0.3
+        if on_ground and not moving:
+            self._stuck_ticks += 1
+            if self._stuck_ticks >= self.stuck_limit:
+                self._stuck_ticks = 0
+                return Status.FAILURE
+        else:
+            self._stuck_ticks = 0
+        return Status.RUNNING
+
+    @staticmethod
+    def _head_clear(ctx: TickContext) -> bool:
+        gs = ctx.game_state
+        tw = gs.tile_window
+        if not tw or not tw.rows:
+            return True
+        p = gs.player
+        pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
+        head_y = int(p.pos[1] / 16.0)
+        for dy in range(1, 3):
+            t = tw.tile_at(pcx, head_y - dy)
+            if t is not None and t.solid:
+                return False
+        return True
+
+    def reset(self) -> None:
+        self._stuck_ticks = 0
+
+
 class Swim(Action):
     def execute(self, ctx: TickContext) -> Status:
         direction = ctx.game_state.player.direction

@@ -7,8 +7,8 @@ from terraria_agent.spinal_cord.bt import Parallel, Selector, Sequence
 from terraria_agent.spinal_cord.bt.core import Node, Status
 from terraria_agent.spinal_cord.bt.leaves import Condition
 from terraria_agent.spinal_cord.bt.decorators import ForceSuccess
-from terraria_agent.spinal_cord.conditions.environment import IsCliffEdge
-from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveRight, MoveToObject, BuildBridge
+from terraria_agent.spinal_cord.conditions.environment import IsCliffEdge, IsCaveEntrance
+from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveRight, MoveToObject, BuildBridge, JumpOverCave
 from terraria_agent.spinal_cord.actions.interaction import (
     ShakeTree, ChopBigTree, BigTreeChopped, PickUpValuableDrop,
     OpenChest, EnsureSmartCursorOn, LootAll, MarkChestLooted,
@@ -33,25 +33,12 @@ class TriggerCondition(Condition):
         return self._predicate(ctx)
 
 
-def _has_big_tree_nearby(ctx: TickContext) -> bool:
-    from terraria_agent.spinal_cord.actions.interaction import (
-        _tree_height, _BIG_TREE_HEIGHT, _big_trees_chopped, _BIG_TREE_LIMIT,
-    )
-    if _big_trees_chopped >= _BIG_TREE_LIMIT:
-        return False
-    for o in ctx.game_state.objects:
-        if o.type == "tree" and o.distance <= 6.0 and _tree_height(ctx, o) >= _BIG_TREE_HEIGHT:
-            return True
-    return False
-
-
 def _pit_unreachable_ahead(ctx: TickContext) -> bool:
     from terraria_agent.models.game_state import TerrainType
     return ctx.game_state.terrain_ahead == TerrainType.PIT
 
 
 TRIGGER_REGISTRY: dict[str, Callable[[TickContext], bool]] = {
-    "big_tree_nearby": _has_big_tree_nearby,
     "chest_nearby": lambda ctx: any(
         o.type == "chest"
         and o.tile_pos not in ctx.looted_chests
@@ -66,7 +53,6 @@ TRIGGER_REGISTRY: dict[str, Callable[[TickContext], bool]] = {
 
 
 TASK_MODE: dict[str, TaskMode] = {
-    "big_tree_nearby": TaskMode.EXCLUSIVE,
     "chest_nearby": TaskMode.EXCLUSIVE,
     "wood_gte_10": TaskMode.EXCLUSIVE,
     "pit_unreachable_ahead": TaskMode.EXCLUSIVE,
@@ -74,19 +60,22 @@ TASK_MODE: dict[str, TaskMode] = {
 }
 
 
-def _build_task_subtree(trigger: str, action: str) -> Node | None:
-    if trigger == "big_tree_nearby":
+def _build_goal_subtree(goal_kind: str) -> Node | None:
+    if goal_kind == "chop_tree":
         return Sequence(
             children=[
-                TriggerCondition(TRIGGER_REGISTRY["big_tree_nearby"], name="HasBigTree"),
                 MoveToObject("tree", reach_tiles=3.0),
                 ChopBigTree(),
                 BigTreeChopped(),
                 PickUpValuableDrop(),
             ],
-            name="Task_chop_big_tree",
+            name="Goal_chop_tree",
         )
-    elif trigger == "chest_nearby":
+    return None
+
+
+def _build_task_subtree(trigger: str, action: str) -> Node | None:
+    if trigger == "chest_nearby":
         return Sequence(
             children=[
                 TriggerCondition(TRIGGER_REGISTRY["chest_nearby"], name="HasChest"),
@@ -119,6 +108,13 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
             children=[
                 Sequence(
                     children=[
+                        IsCaveEntrance(name="CaveEntranceAhead"),
+                        JumpOverCave(name="SkirtCave"),
+                    ],
+                    name="CaveSkirt",
+                ),
+                Sequence(
+                    children=[
                         IsCliffEdge(name="CliffEdgeAhead"),
                         ForceSuccess(BuildBridge(), name="BridgeOrHold"),
                     ],
@@ -135,6 +131,13 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
     elif trigger == "default":
         return Selector(
             children=[
+                Sequence(
+                    children=[
+                        IsCaveEntrance(name="CaveEntranceAhead"),
+                        JumpOverCave(name="SkirtCave"),
+                    ],
+                    name="CaveSkirt",
+                ),
                 Sequence(
                     children=[
                         IsCliffEdge(name="CliffEdgeAhead"),
@@ -158,9 +161,32 @@ class StatefulTaskSelector(Node):
         super().__init__(name)
         self._active_trigger: str | None = None
         self._active_node: Node | None = None
+        self._goal_kind: str | None = None
+        self._goal_node: Node | None = None
         self._priority_order = ["critical", "high", "medium", "low", "baseline"]
 
     def tick(self, ctx: TickContext) -> Status:
+        goal = ctx.active_goal
+        if goal is not None:
+            if self._goal_kind != goal.kind:
+                if self._goal_node is not None:
+                    self._goal_node.reset()
+                self._goal_node = _build_goal_subtree(goal.kind)
+                self._goal_kind = goal.kind
+            if self._goal_node is not None:
+                ctx.exclusive_active = True
+                status = self._goal_node.tick(ctx)
+                ctx.bt_trace.append(f"{self.name}>GOAL({goal.kind})")
+                if status != Status.RUNNING:
+                    self._goal_node.reset()
+                    self._goal_kind = None
+                    self._goal_node = None
+                return status
+        elif self._goal_node is not None:
+            self._goal_node.reset()
+            self._goal_kind = None
+            self._goal_node = None
+
         if self._active_trigger is not None and TASK_MODE.get(self._active_trigger) == TaskMode.EXCLUSIVE:
             ctx.exclusive_active = True
             status = self._active_node.tick(ctx)
@@ -196,6 +222,10 @@ class StatefulTaskSelector(Node):
             self._active_node.reset()
         self._active_trigger = None
         self._active_node = None
+        if self._goal_node is not None:
+            self._goal_node.reset()
+        self._goal_kind = None
+        self._goal_node = None
 
 
 def build_task_executor():

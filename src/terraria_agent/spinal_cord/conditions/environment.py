@@ -76,7 +76,7 @@ class IsCliffEdge(Condition):
         from terraria_agent.diag_log import diag
         gs = ctx.game_state
         p = gs.player
-        if p.velocity[1] != 0.0:
+        if abs(p.velocity[1]) > 0.5:
             diag("cliff_edge", f"skip airborne vy={p.velocity[1]} pos={p.pos}")
             return False
         tw = gs.tile_window
@@ -137,6 +137,47 @@ class IsCliffEdge(Condition):
             f"pos={p.pos} dir={p.direction} pcx={pcx} feet_y={feet_y} "
             f"drops={drops_log} max_cum={max_cum} fatal={fatal} "
             f"jump_reach={self.jump_reach} reason={reason} result={result}",
+        )
+        return result
+
+
+class IsCaveEntrance(Condition):
+    """Forward-overhead rectangle mostly covered by solid tiles = cave entrance.
+    Scan forward `forward` cols × up `up` rows above player head.
+    Column is "capped" if it contains any solid in the rect.
+    If capped_cols >= min_cols → cave entrance."""
+
+    def __init__(self, forward: int = 20, up: int = 8, min_cols: int = 10, name: str = ""):
+        super().__init__(name)
+        self.forward = forward
+        self.up = up
+        self.min_cols = min_cols
+
+    def check(self, ctx: TickContext) -> bool:
+        from terraria_agent.diag_log import diag
+        gs = ctx.game_state
+        tw = gs.tile_window
+        if not tw or not tw.rows:
+            return False
+        p = gs.player
+        pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
+        head_y = int(p.pos[1] / 16.0)
+        sign = 1 if p.direction == "right" else -1
+
+        capped_cols = 0
+        for i in range(1, self.forward + 1):
+            cx = pcx + sign * i
+            for dy in range(1, self.up + 1):
+                t = tw.tile_at(cx, head_y - dy)
+                if t is not None and t.solid:
+                    capped_cols += 1
+                    break
+
+        result = capped_cols >= self.min_cols
+        diag(
+            "cliff_edge",
+            f"cave_entrance pos={p.pos} dir={p.direction} pcx={pcx} head_y={head_y} "
+            f"capped_cols={capped_cols}/{self.forward} min={self.min_cols} result={result}",
         )
         return result
 
