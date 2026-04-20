@@ -17,6 +17,9 @@ _BIG_TREE_LIMIT = 2
 _BIG_TREE_HEIGHT = 16
 
 
+_TREE_TRUNK_TYPES = (5, 72, 323)
+
+
 def _tree_height(ctx: TickContext, tree_obj) -> int:
     tw = ctx.game_state.tile_window
     if tw is None:
@@ -25,7 +28,7 @@ def _tree_height(ctx: TickContext, tree_obj) -> int:
     height = 0
     for dy in range(0, 40):
         t = tw.tile_at(tx, ty - dy)
-        if t is not None and t.active and not t.solid:
+        if t is not None and t.active and t.type in _TREE_TRUNK_TYPES:
             height += 1
         elif height > 0:
             break

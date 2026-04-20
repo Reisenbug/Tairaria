@@ -69,10 +69,12 @@ Action schema (you do NOT set strategic goals — commander handles that):
 - {"action": "use_item", "slot": N}
 - {"action": "select_weapon", "preference": "melee"|"ranged"|"best_dps"}
 
-active_goal pins a fine-grained target across ticks (prevents oscillation).
-Kinds: chop_tree. target_tile is the object's tile_pos from scenario view.
-Set one only when you see a specific target worth committing to. BT already
-handles walking/exploring without a goal.
+active_goal pins a fine-grained target across ticks (prevents oscillation) AND is
+the ONLY way to trigger object-focused behavior now (BT no longer auto-triggers).
+Kinds: chop_tree. target_tile is the object's tile_pos from walking-scenario targets[].
+When `targets` contains a tree and you want it chopped → emit set_active_goal(chop_tree, target_tile).
+BT will then MoveToObject → ChopBigTree → pickup automatically. Without a goal,
+BT only walks + reflexes — it will walk past trees.
 """
 
 

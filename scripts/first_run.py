@@ -16,7 +16,9 @@ Controls:
 """
 from __future__ import annotations
 
+import glob
 import os
+import pathlib
 import time
 
 import dearpygui.dearpygui as dpg
@@ -64,7 +66,19 @@ def _organize_hotbar(orch: "AgentOrchestrator", bridge: StateBridge) -> None:
         bridge.log(f"[first_run] hotbar organize failed: {e}")
 
 
+def _wipe_logs() -> None:
+    logs_dir = pathlib.Path(__file__).resolve().parents[1] / "logs"
+    if not logs_dir.exists():
+        return
+    for p in glob.glob(str(logs_dir / "*.log*")):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
 def main() -> None:
+    _wipe_logs()
     bridge = StateBridge()
 
     detector = None
@@ -79,7 +93,6 @@ def main() -> None:
         stop_biome="jungle",
         task_queue=[
             Task(trigger="pit_unreachable_ahead", action="build_bridge", priority=TaskPriority.CRITICAL),
-            Task(trigger="big_tree_nearby", action="chop_big_tree", priority=TaskPriority.HIGH),
             Task(trigger="chest_nearby", action="loot_chest", priority=TaskPriority.LOW),
             Task(trigger="default", action="move_right", priority=TaskPriority.BASELINE),
         ],
