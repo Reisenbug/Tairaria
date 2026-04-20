@@ -92,7 +92,6 @@ def main() -> None:
         goal="go jungle, collect loot",
         stop_biome="jungle",
         task_queue=[
-            Task(trigger="pit_unreachable_ahead", action="build_bridge", priority=TaskPriority.CRITICAL),
             Task(trigger="chest_nearby", action="loot_chest", priority=TaskPriority.LOW),
             Task(trigger="default", action="move_right", priority=TaskPriority.BASELINE),
         ],

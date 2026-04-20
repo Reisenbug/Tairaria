@@ -33,11 +33,6 @@ class TriggerCondition(Condition):
         return self._predicate(ctx)
 
 
-def _pit_unreachable_ahead(ctx: TickContext) -> bool:
-    from terraria_agent.models.game_state import TerrainType
-    return ctx.game_state.terrain_ahead == TerrainType.PIT
-
-
 TRIGGER_REGISTRY: dict[str, Callable[[TickContext], bool]] = {
     "chest_nearby": lambda ctx: any(
         o.type == "chest"
@@ -47,7 +42,6 @@ TRIGGER_REGISTRY: dict[str, Callable[[TickContext], bool]] = {
         for o in ctx.game_state.objects
     ),
     "wood_gte_10": lambda ctx: ctx.game_state.inventory.get("wood", 0) >= 10,
-    "pit_unreachable_ahead": _pit_unreachable_ahead,
     "default": lambda ctx: True,
 }
 
@@ -55,7 +49,6 @@ TRIGGER_REGISTRY: dict[str, Callable[[TickContext], bool]] = {
 TASK_MODE: dict[str, TaskMode] = {
     "chest_nearby": TaskMode.EXCLUSIVE,
     "wood_gte_10": TaskMode.EXCLUSIVE,
-    "pit_unreachable_ahead": TaskMode.EXCLUSIVE,
     "default": TaskMode.CONCURRENT,
 }
 
@@ -94,14 +87,6 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
                 CraftPlatforms(),
             ],
             name="Task_craft_platforms",
-        )
-    elif trigger == "pit_unreachable_ahead":
-        return Sequence(
-            children=[
-                TriggerCondition(TRIGGER_REGISTRY["pit_unreachable_ahead"], name="PitUnreachable"),
-                BuildBridge(),
-            ],
-            name="Task_build_bridge",
         )
     elif trigger == "default" and action == "move_right":
         return Selector(
