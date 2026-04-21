@@ -101,19 +101,6 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
             children=[
                 Sequence(
                     children=[
-                        IsCaveEntrance(name="CaveEntranceAhead"),
-                        Selector(
-                            children=[
-                                JumpOverCave(name="SkirtCave"),
-                                PillarJump(name="PillarJumpFallback"),
-                            ],
-                            name="SkirtOrPillar",
-                        ),
-                    ],
-                    name="CaveSkirt",
-                ),
-                Sequence(
-                    children=[
                         IsCliffEdge(name="CliffEdgeAhead"),
                         ForceSuccess(BuildBridge(), name="BridgeOrHold"),
                     ],
@@ -130,19 +117,6 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
     elif trigger == "default":
         return Selector(
             children=[
-                Sequence(
-                    children=[
-                        IsCaveEntrance(name="CaveEntranceAhead"),
-                        Selector(
-                            children=[
-                                JumpOverCave(name="SkirtCave"),
-                                PillarJump(name="PillarJumpFallback"),
-                            ],
-                            name="SkirtOrPillar",
-                        ),
-                    ],
-                    name="CaveSkirt",
-                ),
                 Sequence(
                     children=[
                         IsCliffEdge(name="CliffEdgeAhead"),
@@ -169,8 +143,30 @@ class StatefulTaskSelector(Node):
         self._goal_kind: str | None = None
         self._goal_node: Node | None = None
         self._priority_order = ["critical", "high", "medium", "low", "baseline"]
+        self._cave_reflex = Sequence(
+            children=[
+                IsCaveEntrance(name="CaveEntranceAhead"),
+                Selector(
+                    children=[
+                        JumpOverCave(name="SkirtCave"),
+                        PillarJump(name="PillarJumpFallback"),
+                    ],
+                    name="SkirtOrPillar",
+                ),
+            ],
+            name="CaveReflex",
+        )
 
     def tick(self, ctx: TickContext) -> Status:
+        cave_status = self._cave_reflex.tick(ctx)
+        if cave_status == Status.RUNNING:
+            ctx.exclusive_active = True
+            ctx.bt_trace.append(f"{self.name}>CaveReflex")
+            return Status.RUNNING
+        if cave_status == Status.SUCCESS:
+            ctx.bt_trace.append(f"{self.name}>CaveReflex(done)")
+            return Status.SUCCESS
+
         goal = ctx.active_goal
         if goal is not None:
             if self._goal_kind != goal.kind:
