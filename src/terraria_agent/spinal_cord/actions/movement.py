@@ -137,12 +137,14 @@ class PillarJump(Action):
         self._place_started = False
 
     def execute(self, ctx: TickContext) -> Status:
+        from terraria_agent.diag_log import diag
         p = ctx.game_state.player
         platform_slot = next(
             (s.slot_index for s in ctx.game_state.inventory_slots[:10] if s.is_platform),
             None,
         )
         if platform_slot is None:
+            diag("pillar_jump", f"FAIL no_platform_slot")
             return self._finish(ctx, Status.FAILURE)
 
         if self._start_y is None:
@@ -152,26 +154,41 @@ class PillarJump(Action):
         sign = 1 if p.direction == "right" else -1
         dx = 1 if sign > 0 else -2
 
+        emit_jump = False
+        place_emitted = False
+        cursor_pressed = False
         if not self._place_started:
             if ctx.game_state.smart_cursor:
                 ctx.action_buffer.append(GameAction(action=ActionType.KEY_PRESS, item="smart_cursor"))
+                cursor_pressed = True
+                diag("pillar_jump", f"t={self._ticks} smart_cursor=ON press_ctrl pos={p.pos} vy={p.velocity[1]:.3f}")
                 return Status.RUNNING
             ctx.action_buffer.append(GameAction(
                 action=ActionType.PLACE,
-                dx=dx, dy=1, slot=platform_slot,
+                dx=dx, dy=0, slot=platform_slot,
                 duration_frames=self.budget_ticks * 12,
             ))
             self._place_started = True
+            place_emitted = True
 
         on_ground = abs(p.velocity[1]) <= 0.5
         if on_ground:
             ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
+            emit_jump = True
 
         rise = (self._start_y - p.pos[1]) / 16.0
+        diag(
+            "pillar_jump",
+            f"t={self._ticks} pos={p.pos} vy={p.velocity[1]:.3f} on_ground={on_ground} "
+            f"rise={rise:.2f}/{self.target_rise} dx={dx} slot={platform_slot} "
+            f"place_emitted={place_emitted} jump_emitted={emit_jump} sc={ctx.game_state.smart_cursor}"
+        )
         ctx.bt_trace.append(f"PillarJump(rise={rise:.1f}/{self.target_rise})")
         if rise >= self.target_rise:
+            diag("pillar_jump", f"SUCCESS rise={rise:.2f} ticks={self._ticks}")
             return self._finish(ctx, Status.SUCCESS)
         if self._ticks >= self.budget_ticks:
+            diag("pillar_jump", f"FAIL budget rise={rise:.2f} ticks={self._ticks}")
             return self._finish(ctx, Status.FAILURE)
         return Status.RUNNING
 
