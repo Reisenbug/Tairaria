@@ -53,6 +53,9 @@ Reading: ground under P is row just below P. Gap ahead = "." where "#" should be
 extending right+down. Fall >25 tiles (no "#" within 25 rows) = death unless no_fall_dmg.
 Jump clears ~6 up / ~4 across. If ahead has drop ≥3 rows × ≥2 cols, reflex already stops walking —
 decide change_direction or emit a detour set_tasks/set_active_goal.
+Cave reflex: if a 20-col × 8-row forward-overhead block has ≥10 capped cols (overhang), reflex auto
+jumps over / pillars over the cave — bot will NOT enter caves on its own. Do NOT emit goals that
+require entering a cave. (Future: explore_cave goal will opt-in; not implemented yet.)
 
 Rules:
 - Return ONLY valid JSON, no markdown, no prose.
