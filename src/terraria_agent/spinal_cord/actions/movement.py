@@ -123,17 +123,27 @@ class JumpOverCave(Action):
 
 
 class PillarJump(Action):
-    """Rise N tiles by jumping + holding platform-place below feet.
-    Starts a /place hold (cursor anchored to tile below-front of feet), then
-    emits JUMP edges until N tiles gained or budget exhausted. Always issues
-    /place_stop on exit. Requires platform in hotbar."""
+    """Stop + N discrete jump cycles with platform-place below feet.
+    Each cycle: JUMP hold `hold_ticks`, then REST `rest_ticks` (no jump).
+    /place active throughout (cursor below-front of feet). Does NOT emit MOVE.
+    SUCCESS after N cycles or if rise >= target_rise."""
 
-    def __init__(self, target_rise: int = 3, budget_ticks: int = 40, name: str = ""):
+    def __init__(
+        self,
+        num_jumps: int = 5,
+        hold_ticks: int = 6,
+        rest_ticks: int = 10,
+        target_rise: int = 2,
+        name: str = "",
+    ):
         super().__init__(name)
+        self.num_jumps = num_jumps
+        self.hold_ticks = hold_ticks
+        self.rest_ticks = rest_ticks
         self.target_rise = target_rise
-        self.budget_ticks = budget_ticks
         self._start_y: float | None = None
-        self._ticks = 0
+        self._cycle_tick = 0
+        self._cycles_done = 0
         self._place_started = False
 
     def execute(self, ctx: TickContext) -> Status:
@@ -149,47 +159,52 @@ class PillarJump(Action):
 
         if self._start_y is None:
             self._start_y = p.pos[1]
-        self._ticks += 1
 
         sign = 1 if p.direction == "right" else -1
         dx = 1 if sign > 0 else -2
 
-        emit_jump = False
-        place_emitted = False
-        cursor_pressed = False
         if not self._place_started:
             if ctx.game_state.smart_cursor:
                 ctx.action_buffer.append(GameAction(action=ActionType.KEY_PRESS, item="smart_cursor"))
-                cursor_pressed = True
-                diag("pillar_jump", f"t={self._ticks} smart_cursor=ON press_ctrl pos={p.pos} vy={p.velocity[1]:.3f}")
+                diag("pillar_jump", f"smart_cursor=ON press_ctrl pos={p.pos}")
                 return Status.RUNNING
+            total_frames = self.num_jumps * (self.hold_ticks + self.rest_ticks) * 3 + 60
             ctx.action_buffer.append(GameAction(
                 action=ActionType.PLACE,
                 dx=dx, dy=0, slot=platform_slot,
-                duration_frames=self.budget_ticks * 12,
+                duration_frames=total_frames,
             ))
             self._place_started = True
-            place_emitted = True
 
-        on_ground = abs(p.velocity[1]) <= 0.5
-        if on_ground:
+        cycle_len = self.hold_ticks + self.rest_ticks
+        phase = self._cycle_tick % cycle_len
+        in_hold = phase < self.hold_ticks
+
+        jump_emitted = False
+        if in_hold:
             ctx.action_buffer.append(GameAction(action=ActionType.JUMP))
-            emit_jump = True
+            jump_emitted = True
 
         rise = (self._start_y - p.pos[1]) / 16.0
         diag(
             "pillar_jump",
-            f"t={self._ticks} pos={p.pos} vy={p.velocity[1]:.3f} on_ground={on_ground} "
-            f"rise={rise:.2f}/{self.target_rise} dx={dx} slot={platform_slot} "
-            f"place_emitted={place_emitted} jump_emitted={emit_jump} sc={ctx.game_state.smart_cursor}"
+            f"cycle={self._cycles_done+1}/{self.num_jumps} phase={phase}/{cycle_len} "
+            f"in_hold={in_hold} vy={p.velocity[1]:.3f} rise={rise:.2f}/{self.target_rise} "
+            f"jump={jump_emitted} slot={platform_slot}"
         )
-        ctx.bt_trace.append(f"PillarJump(rise={rise:.1f}/{self.target_rise})")
+        ctx.bt_trace.append(f"PillarJump({self._cycles_done+1}/{self.num_jumps},rise={rise:.1f})")
+
+        self._cycle_tick += 1
+        if self._cycle_tick >= cycle_len:
+            self._cycle_tick = 0
+            self._cycles_done += 1
+
         if rise >= self.target_rise:
-            diag("pillar_jump", f"SUCCESS rise={rise:.2f} ticks={self._ticks}")
+            diag("pillar_jump", f"SUCCESS rise={rise:.2f} cycles={self._cycles_done}")
             return self._finish(ctx, Status.SUCCESS)
-        if self._ticks >= self.budget_ticks:
-            diag("pillar_jump", f"FAIL budget rise={rise:.2f} ticks={self._ticks}")
-            return self._finish(ctx, Status.FAILURE)
+        if self._cycles_done >= self.num_jumps:
+            diag("pillar_jump", f"DONE cycles={self._cycles_done} rise={rise:.2f}")
+            return self._finish(ctx, Status.SUCCESS if rise > 0 else Status.FAILURE)
         return Status.RUNNING
 
     def _finish(self, ctx: TickContext, status: Status) -> Status:
@@ -200,7 +215,8 @@ class PillarJump(Action):
 
     def reset(self) -> None:
         self._start_y = None
-        self._ticks = 0
+        self._cycle_tick = 0
+        self._cycles_done = 0
         self._place_started = False
 
 

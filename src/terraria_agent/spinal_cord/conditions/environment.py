@@ -142,15 +142,26 @@ class IsCliffEdge(Condition):
 
 
 class IsCaveEntrance(Condition):
-    """Forward-overhead rectangle mostly covered by solid tiles = cave entrance.
-    Scan forward `forward` cols × up `up` rows above player head.
-    Column is "capped" if it contains any solid in the rect.
-    If capped_cols >= min_cols → cave entrance."""
+    """Thick overhang ahead + walkable ground = cave entrance.
+    For each col in 1..forward ahead of player:
+      - scan up to `max_up` rows upward from head to find first solid
+      - from that row, count consecutive solid tiles upward
+      - col is "thick" if run_len >= min_thickness
+    Ground row at pcx+i must be solid-top (walkable).
+    Trigger if thick_cols >= min_cols within first `forward` cols."""
 
-    def __init__(self, forward: int = 20, up: int = 8, min_cols: int = 10, name: str = ""):
+    def __init__(
+        self,
+        forward: int = 20,
+        max_up: int = 50,
+        min_thickness: int = 8,
+        min_cols: int = 3,
+        name: str = "",
+    ):
         super().__init__(name)
         self.forward = forward
-        self.up = up
+        self.max_up = max_up
+        self.min_thickness = min_thickness
         self.min_cols = min_cols
 
     def check(self, ctx: TickContext) -> bool:
@@ -162,22 +173,41 @@ class IsCaveEntrance(Condition):
         p = gs.player
         pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
         head_y = int(p.pos[1] / 16.0)
+        feet_y = int((p.pos[1] + p.height) / 16.0)
         sign = 1 if p.direction == "right" else -1
 
-        capped_cols = 0
+        thick_cols = 0
+        path_walkable_cols = 0
         for i in range(1, self.forward + 1):
             cx = pcx + sign * i
-            for dy in range(1, self.up + 1):
+            ground = tw.tile_at(cx, feet_y)
+            if ground is not None and ground.solid:
+                path_walkable_cols += 1
+            first_solid_dy = None
+            for dy in range(1, self.max_up + 1):
                 t = tw.tile_at(cx, head_y - dy)
                 if t is not None and t.solid:
-                    capped_cols += 1
+                    first_solid_dy = dy
                     break
+            if first_solid_dy is None:
+                continue
+            run_len = 0
+            for dy in range(first_solid_dy, first_solid_dy + self.min_thickness):
+                t = tw.tile_at(cx, head_y - dy)
+                if t is not None and t.solid:
+                    run_len += 1
+                else:
+                    break
+            if run_len >= self.min_thickness:
+                thick_cols += 1
 
-        result = capped_cols >= self.min_cols
+        has_path = path_walkable_cols >= 2
+        result = has_path and thick_cols >= self.min_cols
         diag(
             "cliff_edge",
             f"cave_entrance pos={p.pos} dir={p.direction} pcx={pcx} head_y={head_y} "
-            f"capped_cols={capped_cols}/{self.forward} min={self.min_cols} result={result}",
+            f"thick_cols={thick_cols}/{self.forward} min={self.min_cols} "
+            f"walkable={path_walkable_cols} has_path={has_path} result={result}",
         )
         return result
 
