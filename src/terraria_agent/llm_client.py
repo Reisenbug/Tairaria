@@ -7,7 +7,7 @@ import re
 from openai import OpenAI
 
 _SKILL_LIST = """\
-explore_right, explore_left, jump_right, jump_left, descend,
+explore_right, explore_left, descend,
 retreat_right, retreat_left, loot, heal,
 fight_nearest, fight_moving_right, fight_moving_left,
 open_chest, loot_chest\
@@ -31,10 +31,9 @@ _SYSTEM = f"""\
 {_SKILL_LIST}
 
 技能说明：
-- explore_right/left：向右/左探索（mod自动处理跳跃避坑）
-- jump_right/left：跳跃越过障碍
-- descend：下洞穴
-- retreat_right/left：跳跃撤退
+- explore_right/left：向右/左探索，mod自动处理所有跳跃（小坡、障碍、坑）
+- descend：下洞穴（按下）
+- retreat_right/left：向右/左撤退
 - fight_nearest：自动瞄准最近敌人攻击（自动选武器）
 - fight_moving_right/left：边移动边攻击
 - open_chest：打开最近箱子
@@ -44,29 +43,29 @@ _SYSTEM = f"""\
 
 ## 内联控制字段（方式二）
 
-移动：left/right/up/down: true，jump: true
+移动：left/right/up/down: true
 攻击：use_item: true，mouse_x/mouse_y: 相对玩家中心tile偏移（整数）
 交互：quick_heal: true，loot_all: true，interact: true + tile_x/tile_y
 切槽：selected_slot: 0-9
 
+注意：不要在控制字段里写 jump:true，跳跃完全由mod自动处理。
+
 ## Terraria 游戏规则
 
-- 树木不挡路，玩家可以直接穿过，不需要砍
-- 实心方块才是真正障碍，需要跳跃或挖开
-- terrain_ahead=block_wall：前方有墙，用jump_right越过
-- terrain_ahead=pit：前方有坑，mod自动处理，继续explore即可
+- 树木不挡路，玩家可以直接穿过
+- terrain_ahead=block_wall 或 pit：继续 explore_right/left，mod自动跳跃处理
 - 近战武器(melee)：靠近攻击；远程(ranged)：保持距离；魔法(magic)：需要蓝量
 - 血量低于30%系统自动中断并撤退，不需要你处理
-- 熔岩(lava)附近立刻向上或反向撤退
+- 熔岩(lava)附近立刻用 retreat 反向撤退
 
 ## 示例
 
 {{"思考": "地形平坦，向右探索", "skill": "explore_right", "持续秒数": 5.0}}
-{{"思考": "前方有墙，跳跃越过", "skill": "jump_right", "持续秒数": 0.5}}
+{{"思考": "前方有墙，mod会自动跳，继续explore", "skill": "explore_right", "持续秒数": 3.0}}
 {{"思考": "有敌人，攻击", "skill": "fight_nearest", "持续秒数": 2.0}}
 {{"思考": "边走边打", "skill": "fight_moving_right", "持续秒数": 2.0}}
 {{"思考": "发现箱子，打开", "skill": "open_chest", "持续秒数": 0.1}}
-{{"思考": "需要同时跳跃攻击，技能库没有", "控制": {{"right": true, "jump": true, "use_item": true, "mouse_x": 3, "mouse_y": -2}}, "持续秒数": 1.0}}
+{{"思考": "需要边走边用特定武器", "控制": {{"right": true, "use_item": true, "mouse_x": 5, "mouse_y": 0}}, "持续秒数": 2.0}}
 """
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)

@@ -13,11 +13,9 @@ _TILE = 16.0
 _SIMPLE: dict[str, dict] = {
     "explore_right":      {"ctrl": {"right": True}, "duration": 5.0},
     "explore_left":       {"ctrl": {"left": True}, "duration": 5.0},
-    "jump_right":         {"ctrl": {"right": True, "jump": True}, "duration": 0.5},
-    "jump_left":          {"ctrl": {"left": True, "jump": True}, "duration": 0.5},
     "descend":            {"ctrl": {"down": True}, "duration": 1.0},
-    "retreat_right":      {"ctrl": {"right": True, "jump": True}, "duration": 3.0},
-    "retreat_left":       {"ctrl": {"left": True, "jump": True}, "duration": 3.0},
+    "retreat_right":      {"ctrl": {"right": True}, "duration": 3.0},
+    "retreat_left":       {"ctrl": {"left": True}, "duration": 3.0},
     "loot":               {"ctrl": {"loot_all": True}, "duration": 0.1},
     "heal":               {"ctrl": {"quick_heal": True}, "duration": 0.1},
 }
@@ -71,7 +69,6 @@ def _skill_fight_moving_right(state: GameState) -> dict | None:
     if result is None:
         return None
     result["ctrl"]["right"] = True
-    result["ctrl"]["jump"] = True
     return result
 
 
@@ -80,7 +77,6 @@ def _skill_fight_moving_left(state: GameState) -> dict | None:
     if result is None:
         return None
     result["ctrl"]["left"] = True
-    result["ctrl"]["jump"] = True
     return result
 
 
