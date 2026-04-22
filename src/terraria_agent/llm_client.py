@@ -74,10 +74,10 @@ _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 class LLMClient:
     def __init__(self) -> None:
         self._client = OpenAI(
-            api_key=os.environ.get("TACTICIAN_API_KEY", ""),
-            base_url=os.environ.get("TACTICIAN_API_URL", "https://api.openai.com/v1"),
+            api_key=os.environ.get("COMMANDER_API_KEY", ""),
+            base_url=os.environ.get("COMMANDER_API_URL", "https://api.openai.com/v1"),
         )
-        self._model = os.environ.get("TACTICIAN_MODEL", "gpt-4o")
+        self._model = os.environ.get("COMMANDER_MODEL", "gpt-4o")
         self._history: list[dict] = []
 
     def decide(self, state_text: str) -> dict:
