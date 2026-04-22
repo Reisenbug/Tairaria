@@ -52,8 +52,10 @@ class ModController:
                 case ActionType.ATTACK:
                     need_mouse_down = True
                     if a.target and self._mouse_enabled() and not self._mouse_paused:
-                        x = max(_MARGIN, min(int(a.target[0]), _SW - _MARGIN))
-                        y = max(_MARGIN, min(int(a.target[1]), _SH - _MARGIN))
+                        raw_x, raw_y = int(a.target[0]), int(a.target[1])
+                        x = max(_MARGIN, min(raw_x, _SW - _MARGIN))
+                        y = max(_MARGIN, min(raw_y, _SH - _MARGIN))
+                        print(f"[mouse] raw=({raw_x},{raw_y}) clamped=({x},{y}) screen=({_SW},{_SH})")
                         if x != _MARGIN and y != _MARGIN:
                             pyautogui.moveTo(x, y)
                 case ActionType.USE_ITEM:

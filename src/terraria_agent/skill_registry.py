@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from terraria_agent.geometry import player_center_world
+from terraria_agent.geometry import player_center_world, world_to_screen
 from terraria_agent.models.actions import ActionType, GameAction
 from terraria_agent.models.game_state import GameState
 from terraria_agent.models.task_queue import TaskQueue
-from terraria_agent.spinal_cord.actions.combat import AttackNearest, EnsureWeaponSlot
 from terraria_agent.spinal_cord.actions.interaction import OpenChest, LootAll
 from terraria_agent.spinal_cord.context import TickContext
 
@@ -55,12 +54,19 @@ def _actions_to_ctrl(actions: list[GameAction], state: GameState) -> dict:
 def _skill_fight_nearest(state: GameState) -> dict | None:
     if not state.enemies:
         return None
-    ctx = _make_ctx(state)
-    EnsureWeaponSlot().execute(ctx)
-    AttackNearest().execute(ctx)
-    ctrl = _actions_to_ctrl(ctx.action_buffer, state)
-    if not ctrl:
-        return None
+    nearest = min(state.enemies, key=lambda e: e.distance)
+    pcx, pcy = player_center_world(state.player)
+    ctrl: dict = {
+        "use_item": True,
+        "mouse_x": round((nearest.pos[0] - pcx) / _TILE),
+        "mouse_y": round((nearest.pos[1] - pcy) / _TILE),
+    }
+    weapon_slot = next(
+        (s.slot_index for s in state.inventory_slots[:10] if s.is_weapon),
+        None,
+    )
+    if weapon_slot is not None and weapon_slot != state.player.selected_slot:
+        ctrl["selected_slot"] = weapon_slot
     return {"ctrl": ctrl, "duration": 2.0}
 
 
