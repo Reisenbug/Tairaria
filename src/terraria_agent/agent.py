@@ -12,6 +12,7 @@ from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.llm_client import LLMClient
 from terraria_agent.models.actions import ActionType, GameAction
 from terraria_agent.models.game_state import GameState, TerrainType
+from terraria_agent.skill_registry import execute as skill_execute
 from terraria_agent.state_serializer import serialize
 
 _EXEC_TICK = 0.2
@@ -199,9 +200,20 @@ def run() -> None:
                 decision = pending
                 pending = None
                 thought = decision.get("思考", "")
-                ctrl = decision.get("控制", {})
                 duration = float(decision.get("持续秒数", 1.0))
-                print(f"[决策] 思考={thought!r} 控制={ctrl} 持续={duration}s")
+                skill_name = decision.get("skill")
+                if skill_name:
+                    resolved = skill_execute(skill_name, state)
+                    if resolved:
+                        ctrl = resolved.get("ctrl", {})
+                        duration = resolved.get("duration", duration)
+                        print(f"[决策] 思考={thought!r} skill={skill_name} 控制={ctrl} 持续={duration}s")
+                    else:
+                        print(f"[决策] 思考={thought!r} skill={skill_name} 未找到，忽略")
+                        ctrl = {}
+                else:
+                    ctrl = decision.get("控制", {})
+                    print(f"[决策] 思考={thought!r} 控制={ctrl} 持续={duration}s")
                 if ctrl:
                     current_ctrl = ctrl
                     deadline = now + duration
