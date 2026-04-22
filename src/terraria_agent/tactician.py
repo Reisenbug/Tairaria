@@ -71,19 +71,23 @@ class Tactician:
         self._thread.start()
 
     def _run(self, state_text: str) -> None:
-        print("[tactician] 调用 API...")
+        import time as _time
+        t0 = _time.monotonic()
+        print(f"[tactician] 调用 {self._model}...")
         try:
             msg = self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=256,
-                timeout=30,
+                timeout=60,
                 messages=[
                     {"role": "system", "content": _SYSTEM},
                     {"role": "user", "content": state_text},
                 ],
             )
+            latency = _time.monotonic() - t0
             raw = msg.choices[0].message.content.strip()
-            print(f"[tactician] 输出={raw!r}")
+            usage = msg.usage
+            print(f"[tactician] {latency:.1f}s | prompt={usage.prompt_tokens} completion={usage.completion_tokens} | {raw!r}")
             m = _JSON_RE.search(raw)
             if m:
                 data = json.loads(m.group())

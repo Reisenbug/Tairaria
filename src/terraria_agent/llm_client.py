@@ -81,19 +81,23 @@ class LLMClient:
         self._history: list[dict] = []
 
     def decide(self, state_text: str) -> dict:
+        import time as _time
         self._history.append({"role": "user", "content": state_text})
         if len(self._history) > 20:
             self._history = self._history[-20:]
 
-        print("[llm] 调用 API...")
+        t0 = _time.monotonic()
+        print(f"[commander] 调用 {self._model}...")
         msg = self._client.chat.completions.create(
             model=self._model,
             max_tokens=256,
             timeout=30,
             messages=[{"role": "system", "content": _SYSTEM}] + self._history,
         )
+        latency = _time.monotonic() - t0
         raw = msg.choices[0].message.content.strip()
-        print(f"[llm] 原始输出={raw!r}")
+        usage = msg.usage
+        print(f"[commander] {latency:.1f}s | prompt={usage.prompt_tokens} completion={usage.completion_tokens} | {raw!r}")
         self._history.append({"role": "assistant", "content": raw})
 
         m = _JSON_RE.search(raw)
