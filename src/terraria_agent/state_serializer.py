@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+from terraria_agent.geometry import player_center_world
 from terraria_agent.models.game_state import GameState
+
+_TILE = 16.0
+
+
+def _rel(entity_pos: tuple[float, float], pcx: float, pcy: float) -> tuple[int, int]:
+    dx = round((entity_pos[0] - pcx) / _TILE)
+    dy = round((entity_pos[1] - pcy) / _TILE)
+    return dx, dy
 
 
 def serialize(state: GameState) -> str:
     p = state.player
+    pcx, pcy = player_center_world(p)
     lines: list[str] = []
 
-    lines.append(f"hp={p.hp}/{p.max_hp} pos=({p.pos[0]:.0f},{p.pos[1]:.0f}) vel=({p.velocity[0]:.1f},{p.velocity[1]:.1f}) facing={p.direction}")
+    lines.append(f"hp={p.hp}/{p.max_hp} vel=({p.velocity[0]:.1f},{p.velocity[1]:.1f}) facing={p.direction}")
     lines.append(f"biome={state.biome} danger={p.danger_level} hp_trend={p.hp_trend}")
 
     if p.buffs:
@@ -23,17 +33,26 @@ def serialize(state: GameState) -> str:
 
     if state.enemies:
         close = sorted(state.enemies, key=lambda e: e.distance)[:5]
-        parts = [f"{e.type}(hp={e.hp}/{e.max_hp},dist={e.distance:.1f},threat={e.threat.value})" for e in close]
+        parts = []
+        for e in close:
+            dx, dy = _rel(e.pos, pcx, pcy)
+            parts.append(f"{e.type}(hp={e.hp}/{e.max_hp},rel={dx:+d},{dy:+d},threat={e.threat.value})")
         lines.append(f"enemies=[{', '.join(parts)}]")
 
     if state.dropped_items:
         close_drops = sorted(state.dropped_items, key=lambda d: d.distance)[:5]
-        parts = [f"{d.name}x{d.stack}(dist={d.distance:.1f})" for d in close_drops]
+        parts = []
+        for d in close_drops:
+            dx, dy = _rel(d.pos, pcx, pcy)
+            parts.append(f"{d.name}x{d.stack}(rel={dx:+d},{dy:+d})")
         lines.append(f"drops=[{', '.join(parts)}]")
 
     if state.objects:
         close_objs = sorted(state.objects, key=lambda o: o.distance)[:5]
-        parts = [f"{o.type}(dist={o.distance:.1f})" for o in close_objs]
+        parts = []
+        for o in close_objs:
+            dx, dy = _rel(o.pos, pcx, pcy)
+            parts.append(f"{o.type}(rel={dx:+d},{dy:+d})")
         lines.append(f"objects=[{', '.join(parts)}]")
 
     inv_summary = {k: v for k, v in state.inventory.items() if v > 0}
