@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import threading
 
+from pynput import keyboard as _kb
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -168,7 +169,28 @@ def run() -> None:
     llm = LLMClient()
     tactician = Tactician()
     trigger = TriggerDetector()
-    print("[agent] 启动 — ctrl+c 停止")
+    print("[agent] 启动 — ctrl+c 停止 | ctrl+cmd+b 暂停/恢复鼠标")
+
+    def _on_hotkey():
+        paused = controller.toggle_mouse()
+        print("[agent] 鼠标已" + ("暂停" if paused else "恢复"))
+
+    _hotkey = _kb.HotKey(_kb.HotKey.parse('<ctrl>+<cmd>+b'), _on_hotkey)
+
+    def _on_key(key):
+        try:
+            _hotkey.press(key)
+        except Exception:
+            pass
+
+    def _on_release(key):
+        try:
+            _hotkey.release(key)
+        except Exception:
+            pass
+
+    _listener = _kb.Listener(on_press=_on_key, on_release=_on_release, suppress=False)
+    _listener.start()
 
     current_ctrl: dict = {"right": True}
     pending: dict | None = None

@@ -11,6 +11,9 @@ from terraria_agent.models.actions import ActionType, GameAction
 pyautogui.PAUSE = 0.0
 pyautogui.FAILSAFE = False
 
+_SW, _SH = pyautogui.size()
+_MARGIN = 50
+
 _CONTROL_URL = "http://127.0.0.1:17878/control"
 _NO_PROXY_HANDLER = urllib.request.ProxyHandler({})
 _OPENER = urllib.request.build_opener(_NO_PROXY_HANDLER)
@@ -26,6 +29,15 @@ class ModController:
     def __init__(self, mouse_control_flag=None):
         self.key_state = KeyState()
         self._mouse_enabled = mouse_control_flag or (lambda: True)
+        self._mouse_paused = False
+
+    def toggle_mouse(self) -> bool:
+        self._mouse_paused = not self._mouse_paused
+        if self._mouse_paused:
+            if getattr(self, "_holding_mouse", False):
+                pyautogui.mouseUp(button="left")
+                self._holding_mouse = False
+        return self._mouse_paused
 
     def execute(self, actions: list[GameAction]) -> None:
         ctrl: dict = {}
@@ -39,8 +51,11 @@ class ModController:
                     ctrl["jump"] = True
                 case ActionType.ATTACK:
                     need_mouse_down = True
-                    if a.target and self._mouse_enabled():
-                        pyautogui.moveTo(int(a.target[0]), int(a.target[1]))
+                    if a.target and self._mouse_enabled() and not self._mouse_paused:
+                        x = max(_MARGIN, min(int(a.target[0]), _SW - _MARGIN))
+                        y = max(_MARGIN, min(int(a.target[1]), _SH - _MARGIN))
+                        if x != _MARGIN and y != _MARGIN:
+                            pyautogui.moveTo(x, y)
                 case ActionType.USE_ITEM:
                     need_mouse_down = True
                     if a.slot is not None:
@@ -71,12 +86,11 @@ class ModController:
                 case ActionType.PICK_UP | ActionType.CRAFT | ActionType.NONE:
                     pass
 
-        if need_mouse_down:
-            if self._mouse_enabled():
-                if not self.key_state.press("mouse:left"):
-                    pass
-                pyautogui.mouseDown(button="left")
-                self._holding_mouse = True
+        if need_mouse_down and self._mouse_enabled() and not self._mouse_paused:
+            if not self.key_state.press("mouse:left"):
+                pass
+            pyautogui.mouseDown(button="left")
+            self._holding_mouse = True
         elif getattr(self, "_holding_mouse", False):
             pyautogui.mouseUp(button="left")
             self.key_state.release("mouse:left")
@@ -95,14 +109,15 @@ class ModController:
         self._http_post_json(_CONTROL_URL, ctrl)
 
     def _http_post_json(self, url: str, payload: dict) -> None:
+        from terraria_agent.diag_log import diag
         try:
             data = json.dumps(payload).encode()
             req = urllib.request.Request(url, data=data, method="POST")
             req.add_header("Content-Type", "application/json")
             with _OPENER.open(req, timeout=0.2) as resp:
                 resp.read()
-        except Exception:
-            pass
+        except Exception as e:
+            diag("http_post", f"FAIL url={url} payload={payload} err={type(e).__name__}:{e}")
 
     def _http_fire(self, url: str) -> None:
         try:
