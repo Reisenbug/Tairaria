@@ -141,14 +141,18 @@ def _parse_actions(ctrl: dict, state: GameState) -> list[GameAction]:
         actions.append(GameAction(action=ActionType.JUMP))
 
     if ctrl.get("use_item"):
-        rel_x = ctrl.get("mouse_x")
-        rel_y = ctrl.get("mouse_y")
-        if rel_x is not None and rel_y is not None:
-            pcx, pcy = player_center_world(state.player)
-            world_xy = (pcx + float(rel_x) * _TILE, pcy + float(rel_y) * _TILE)
-            target = world_to_screen(world_xy, state.camera)
+        screen_xy = ctrl.get("screen_xy")
+        if screen_xy is not None:
+            target = screen_xy
         else:
-            target = None
+            rel_x = ctrl.get("mouse_x")
+            rel_y = ctrl.get("mouse_y")
+            if rel_x is not None and rel_y is not None:
+                pcx, pcy = player_center_world(state.player)
+                world_xy = (pcx + float(rel_x) * _TILE, pcy + float(rel_y) * _TILE)
+                target = world_to_screen(world_xy, state.camera)
+            else:
+                target = None
         actions.append(GameAction(action=ActionType.ATTACK, target=target))
 
     if not actions:
