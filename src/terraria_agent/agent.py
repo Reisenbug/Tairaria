@@ -13,13 +13,15 @@ from terraria_agent.llm_client import LLMClient
 from terraria_agent.models.actions import ActionType, GameAction
 from terraria_agent.models.game_state import GameState, TerrainType
 from terraria_agent.skill_registry import execute as skill_execute
-from terraria_agent.state_serializer import serialize
+from terraria_agent.state_serializer import serialize, serialize_macro
+from terraria_agent.tactician import Tactician
 
 _EXEC_TICK = 0.2
 _TILE = 16.0
 _STUCK_SECONDS = 2.0
 _STUCK_SPEED_THRESHOLD = 0.5 * _TILE
 _HP_DROP_THRESHOLD = 0.4
+_TACTICIAN_INTERVAL = 60.0
 
 _FRUITS = {
     "苹果", "杏", "葡萄柚", "柠檬", "桃子",
@@ -164,16 +166,21 @@ def run() -> None:
     perception = TerraBlindClient()
     controller = ModController()
     llm = LLMClient()
+    tactician = Tactician()
     trigger = TriggerDetector()
     print("[agent] 启动 — ctrl+c 停止")
 
     current_ctrl: dict = {"right": True}
     pending: dict | None = None
     pending_lock = threading.Lock()
+    visited_biomes: list[str] = []
+    tactician_last: float = 0.0
 
     def llm_worker(state_text: str, trigger_reason: str) -> None:
         nonlocal pending
-        full_text = f"[触发:{trigger_reason}]\n{state_text}"
+        goal = tactician.goal
+        goal_line = f"[目标:{goal}]\n" if goal else ""
+        full_text = f"{goal_line}[触发:{trigger_reason}]\n{state_text}"
         decision = llm.decide(full_text)
         with pending_lock:
             pending = decision if decision else {}
@@ -188,6 +195,15 @@ def run() -> None:
             print("[agent] 等待游戏状态...")
             time.sleep(2.0)
             continue
+
+        if state.biome and (not visited_biomes or visited_biomes[-1] != state.biome):
+            visited_biomes.append(state.biome)
+
+        if tactician.is_idle() and now - tactician_last >= _TACTICIAN_INTERVAL:
+            tactician_last = now
+            macro_text = serialize_macro(state, goal=tactician.goal, visited_biomes=visited_biomes)
+            print(f"\n[tactician 触发]\n{macro_text}")
+            tactician.start(macro_text)
 
         reason = _safety_interrupt(state)
         if reason:

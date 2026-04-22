@@ -60,3 +60,26 @@ def serialize(state: GameState) -> str:
         lines.append(f"inventory={inv_summary}")
 
     return "\n".join(lines)
+
+
+def serialize_macro(state: GameState, goal: str = "", visited_biomes: list[str] | None = None) -> str:
+    p = state.player
+    lines: list[str] = []
+
+    lines.append(f"hp={p.hp}/{p.max_hp} hp_trend={p.hp_trend} danger={p.danger_level}")
+    lines.append(f"biome={state.biome}")
+    if visited_biomes:
+        lines.append(f"visited_biomes={','.join(visited_biomes)}")
+
+    inv_summary = {k: v for k, v in state.inventory.items() if v > 0}
+    if inv_summary:
+        lines.append(f"inventory={inv_summary}")
+
+    categories = list({s.category for s in state.inventory_slots if s.category and s.name})
+    if categories:
+        lines.append(f"have_categories={','.join(sorted(categories))}")
+
+    if goal:
+        lines.append(f"current_goal={goal}")
+
+    return "\n".join(lines)
