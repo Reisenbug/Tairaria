@@ -133,6 +133,8 @@ def _skill_loot_chest(state: GameState) -> dict | None:
     return {"ctrl": ctrl, "duration": 0.1}
 
 
+_MOD_SKILLS: set[str] = {"pillar_jump"}
+
 _DYNAMIC: dict[str, object] = {
     "fight_nearest":       _skill_fight_nearest,
     "fight_moving_right":  _skill_fight_moving_right,
@@ -143,10 +145,16 @@ _DYNAMIC: dict[str, object] = {
     "loot_chest":          _skill_loot_chest,
 }
 
-SKILL_NAMES: list[str] = list(_SIMPLE) + list(_DYNAMIC)
+SKILL_NAMES: list[str] = list(_SIMPLE) + list(_DYNAMIC) + list(_MOD_SKILLS)
 
 
-def execute(name: str, state: GameState) -> dict | None:
+def execute(name: str, state: GameState, controller=None) -> dict | None:
+    if name in _MOD_SKILLS:
+        if controller is None:
+            return None
+        direction = state.player.direction
+        controller.fire_skill(name, direction)
+        return {"ctrl": {direction: True}, "duration": 5.0}
     if name in _SIMPLE:
         return _SIMPLE[name]
     fn = _DYNAMIC.get(name)

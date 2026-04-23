@@ -23,6 +23,7 @@ _LOOT_ALL_URL = "http://127.0.0.1:17878/loot_all"
 _INTERACT_URL = "http://127.0.0.1:17878/interact"
 _PLACE_URL = "http://127.0.0.1:17878/place"
 _PLACE_STOP_URL = "http://127.0.0.1:17878/place_stop"
+_SKILL_URL = "http://127.0.0.1:17878/skill"
 
 
 class ModController:
@@ -100,6 +101,9 @@ class ModController:
 
         if ctrl:
             self._post_control(ctrl)
+
+    def fire_skill(self, name: str, direction: str = "right") -> None:
+        self._http_post_json(_SKILL_URL, {"name": name, "direction": direction})
 
     def release_all(self) -> None:
         self._post_control({})

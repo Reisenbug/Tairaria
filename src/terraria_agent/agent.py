@@ -246,7 +246,7 @@ def run() -> None:
                 duration = float(decision.get("持续秒数", 1.0))
                 skill_name = decision.get("skill")
                 if skill_name:
-                    resolved = skill_execute(skill_name, state)
+                    resolved = skill_execute(skill_name, state, controller)
                     if resolved:
                         ctrl = resolved.get("ctrl", {})
                         duration = resolved.get("duration", duration)
