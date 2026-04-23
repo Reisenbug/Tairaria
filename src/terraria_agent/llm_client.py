@@ -81,27 +81,24 @@ class LLMClient:
             base_url=os.environ.get("COMMANDER_API_URL", "https://api.openai.com/v1"),
         )
         self._model = os.environ.get("COMMANDER_MODEL", "gpt-4o")
-        self._history: list[dict] = []
 
     def decide(self, state_text: str) -> dict:
         import time as _time
-        self._history.append({"role": "user", "content": state_text})
-        if len(self._history) > 20:
-            self._history = self._history[-20:]
-
         t0 = _time.monotonic()
         print(f"[commander] 调用 {self._model}...")
         msg = self._client.chat.completions.create(
             model=self._model,
             max_tokens=256,
             timeout=30,
-            messages=[{"role": "system", "content": _SYSTEM}] + self._history,
+            messages=[
+                {"role": "system", "content": _SYSTEM},
+                {"role": "user", "content": state_text},
+            ],
         )
         latency = _time.monotonic() - t0
         raw = msg.choices[0].message.content.strip()
         usage = msg.usage
         print(f"[commander] {latency:.1f}s | prompt={usage.prompt_tokens} completion={usage.completion_tokens} | {raw!r}")
-        self._history.append({"role": "assistant", "content": raw})
 
         m = _JSON_RE.search(raw)
         if not m:
