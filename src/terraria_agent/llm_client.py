@@ -10,6 +10,7 @@ _SKILL_LIST = """\
 explore_right, explore_left, descend,
 retreat_right, retreat_left, loot, heal,
 fight_nearest, fight_moving_right, fight_moving_left,
+dig_forward, build_bridge,
 open_chest, loot_chest\
 """
 
@@ -36,6 +37,8 @@ _SYSTEM = f"""\
 - retreat_right/left：向右/左撤退
 - fight_nearest：自动瞄准最近敌人攻击（自动选武器）
 - fight_moving_right/left：边移动边攻击
+- dig_forward：用镐挖前方墙壁（卡住/block_wall时使用）
+- build_bridge：铺平台越过大坑（需要背包有平台）
 - open_chest：打开最近箱子
 - loot_chest：拾取箱子内所有物品
 - loot：拾取附近掉落物

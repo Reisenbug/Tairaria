@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from terraria_agent.geometry import player_center_world, world_to_screen
+from terraria_agent.geometry import player_center_world, world_to_screen, tile_offset_world
 from terraria_agent.models.actions import ActionType, GameAction
-from terraria_agent.models.game_state import GameState
+from terraria_agent.models.game_state import GameState, TerrainType
 from terraria_agent.models.task_queue import TaskQueue
 from terraria_agent.spinal_cord.actions.interaction import OpenChest, LootAll
 from terraria_agent.spinal_cord.context import TickContext
@@ -82,6 +82,36 @@ def _skill_fight_moving_left(state: GameState) -> dict | None:
     return result
 
 
+def _skill_dig_forward(state: GameState) -> dict | None:
+    pickaxe = next((s for s in state.inventory_slots[:10] if s.is_pickaxe), None)
+    if pickaxe is None:
+        return None
+    p = state.player
+    sign = 1.0 if p.direction == "right" else -1.0
+    target_world = tile_offset_world(p, sign * 1.5, 0.0)
+    screen_xy = world_to_screen(target_world, state.camera)
+    ctrl: dict = {"use_item": True, "screen_xy": screen_xy}
+    if pickaxe.slot_index != p.selected_slot:
+        ctrl["selected_slot"] = pickaxe.slot_index
+    direction = "right" if sign > 0 else "left"
+    ctrl[direction] = True
+    return {"ctrl": ctrl, "duration": 2.0}
+
+
+def _skill_build_bridge(state: GameState) -> dict | None:
+    platform_slot = next((s for s in state.inventory_slots[:10] if s.is_platform), None)
+    if platform_slot is None:
+        return None
+    p = state.player
+    direction = p.direction
+    ctrl: dict = {
+        "use_item": True,
+        direction: True,
+        "selected_slot": platform_slot.slot_index,
+    }
+    return {"ctrl": ctrl, "duration": 3.0}
+
+
 def _skill_open_chest(state: GameState) -> dict | None:
     chests = [o for o in state.objects if o.type == "chest"]
     if not chests:
@@ -107,6 +137,8 @@ _DYNAMIC: dict[str, object] = {
     "fight_nearest":       _skill_fight_nearest,
     "fight_moving_right":  _skill_fight_moving_right,
     "fight_moving_left":   _skill_fight_moving_left,
+    "dig_forward":         _skill_dig_forward,
+    "build_bridge":        _skill_build_bridge,
     "open_chest":          _skill_open_chest,
     "loot_chest":          _skill_loot_chest,
 }
