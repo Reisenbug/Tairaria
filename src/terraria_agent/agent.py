@@ -13,6 +13,7 @@ from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.llm_client import LLMClient
 from terraria_agent.models.actions import ActionType, GameAction
 from terraria_agent.models.game_state import GameState, TerrainType
+from terraria_agent.reflex import check as reflex_check
 from terraria_agent.skill_registry import execute as skill_execute
 from terraria_agent.state_serializer import serialize, serialize_macro
 from terraria_agent.tactician import Tactician
@@ -276,7 +277,11 @@ def run() -> None:
                 )
                 llm_thread.start()
 
-        actions = _parse_actions(current_ctrl, state)
+        reflex_ctrl = reflex_check(state)
+        if reflex_ctrl:
+            actions = _parse_actions(reflex_ctrl, state)
+        else:
+            actions = _parse_actions(current_ctrl, state)
         controller.execute(actions)
 
         time.sleep(_EXEC_TICK)
