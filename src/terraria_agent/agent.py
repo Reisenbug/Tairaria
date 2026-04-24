@@ -13,6 +13,7 @@ from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.llm_client import LLMClient
 from terraria_agent.models.actions import ActionType, GameAction
 from terraria_agent.models.game_state import GameState, TerrainType
+from terraria_agent.cave_detector import detect as cave_detect
 from terraria_agent.reflex import check as reflex_check
 from terraria_agent.skill_registry import execute as skill_execute
 from terraria_agent.state_serializer import serialize, serialize_macro
@@ -276,6 +277,16 @@ def run() -> None:
                     target=llm_worker, args=(state_text, trigger_reason), daemon=True
                 )
                 llm_thread.start()
+
+        cave = cave_detect(state)
+        if cave:
+            _, cave_dir, walk_back, rise_tiles = cave
+            print(f"[cave] dir={cave_dir} walk_back={walk_back} rise_tiles={rise_tiles}")
+            import pyautogui
+            if state.smart_cursor:
+                pyautogui.press("ctrl")
+            controller.fire_skill("cave_bypass", cave_dir, rise_tiles=rise_tiles, walk_back=walk_back)
+            deadline = now + walk_back * 0.2 + rise_tiles * 0.5 + 4.0
 
         reflex_ctrl = reflex_check(state)
         if reflex_ctrl:

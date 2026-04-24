@@ -45,6 +45,25 @@ def count_roof_thickness(tw, cx, head_y):
     return count
 
 
+def find_overhead_edge(tw, pcx, head_y, cave_sign):
+    scan_sign = -cave_sign
+    for i in range(0, 20):
+        cx = pcx + scan_sign * i
+        has = False
+        for dy in range(1, 16):
+            t = tw.tile_at(cx, head_y - dy)
+            if t is None:
+                continue
+            if t.type in _CLOUD_TYPES:
+                break
+            if t.solid:
+                has = True
+                break
+        if not has:
+            return i
+    return 0
+
+
 def detect_cave(tw, pcx, head_y, sign):
     thicknesses = []
     for i in range(1, 16):
@@ -79,6 +98,11 @@ while True:
             continue
         is_cave, thicknesses = detect_cave(tw, pcx, head_y, sign)
         thick_str = " ".join(str(t) for t in thicknesses)
-        print(f"{direction} [{'cave★' if is_cave else '-'}] | {thick_str}")
+        if is_cave:
+            edge_i = find_overhead_edge(tw, pcx, head_y, sign)
+            walk_back = max(1, edge_i + 2)
+            print(f"{direction} [cave★ walk_back={walk_back} edge_i={edge_i}] | {thick_str}")
+        else:
+            print(f"{direction} [{'cave★' if is_cave else '-'}] | {thick_str}")
     print()
     time.sleep(0.5)
