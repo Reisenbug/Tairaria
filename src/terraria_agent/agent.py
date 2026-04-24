@@ -278,21 +278,26 @@ def run() -> None:
                 )
                 llm_thread.start()
 
-        cave = cave_detect(state)
-        if cave:
-            _, cave_dir, walk_back, rise_tiles = cave
-            print(f"[cave] dir={cave_dir} walk_back={walk_back} rise_tiles={rise_tiles}")
-            import pyautogui
-            if state.smart_cursor:
-                pyautogui.press("ctrl")
-            controller.fire_skill("cave_bypass", cave_dir, rise_tiles=rise_tiles, walk_back=walk_back)
-            deadline = now + walk_back * 0.2 + rise_tiles * 0.5 + 4.0
+        if now >= deadline:
+            cave = cave_detect(state)
+            if cave:
+                _, cave_dir, walk_back, rise_tiles = cave
+                print(f"[cave] dir={cave_dir} walk_back={walk_back} rise_tiles={rise_tiles}")
+                import pyautogui
+                if state.smart_cursor:
+                    pyautogui.press("ctrl")
+                controller.fire_skill("cave_bypass", cave_dir, rise_tiles=rise_tiles, walk_back=walk_back)
+                skill_duration = walk_back * 0.2 + rise_tiles * 0.5 + 4.0
+                deadline = now + skill_duration
+                current_ctrl = {}
 
         reflex_ctrl = reflex_check(state)
         if reflex_ctrl:
             actions = _parse_actions(reflex_ctrl, state)
-        else:
+        elif current_ctrl:
             actions = _parse_actions(current_ctrl, state)
+        else:
+            actions = [GameAction(action=ActionType.NONE)]
         controller.execute(actions)
 
         time.sleep(_EXEC_TICK)
