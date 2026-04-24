@@ -133,7 +133,7 @@ def _skill_loot_chest(state: GameState) -> dict | None:
     return {"ctrl": ctrl, "duration": 0.1}
 
 
-_MOD_SKILLS: set[str] = {"pillar_jump"}
+_MOD_SKILLS: set[str] = {"pillar_jump", "cave_bypass"}
 
 _DYNAMIC: dict[str, object] = {
     "fight_nearest":       _skill_fight_nearest,
@@ -157,9 +157,10 @@ def execute(name: str, state: GameState, controller=None) -> dict | None:
             pyautogui.press("ctrl")
         direction = state.player.direction
         rise_tiles = 1
+        walk_back = 2
         if name == "pillar_jump" and state.terrain_scan is not None:
             rise_tiles = max(1, int(state.terrain_scan.depth_or_height) - 7)
-        controller.fire_skill(name, direction, rise_tiles=rise_tiles)
+        controller.fire_skill(name, direction, rise_tiles=rise_tiles, walk_back=walk_back)
         duration = rise_tiles * 0.5 + 3.0
         return {"ctrl": {direction: True}, "duration": duration}
     if name in _SIMPLE:
