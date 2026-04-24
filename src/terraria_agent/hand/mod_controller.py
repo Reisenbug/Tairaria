@@ -102,8 +102,8 @@ class ModController:
         if ctrl:
             self._post_control(ctrl)
 
-    def fire_skill(self, name: str, direction: str = "right") -> None:
-        self._http_post_json(_SKILL_URL, {"name": name, "direction": direction})
+    def fire_skill(self, name: str, direction: str = "right", rise_tiles: int = 8) -> None:
+        self._http_post_json(_SKILL_URL, {"name": name, "direction": direction, "rise_tiles": rise_tiles})
 
     def release_all(self) -> None:
         self._post_control({})

@@ -156,8 +156,12 @@ def execute(name: str, state: GameState, controller=None) -> dict | None:
         if state.smart_cursor:
             pyautogui.press("ctrl")
         direction = state.player.direction
-        controller.fire_skill(name, direction)
-        return {"ctrl": {direction: True}, "duration": 5.0}
+        rise_tiles = 1
+        if name == "pillar_jump" and state.terrain_scan is not None:
+            rise_tiles = max(1, int(state.terrain_scan.depth_or_height) - 7)
+        controller.fire_skill(name, direction, rise_tiles=rise_tiles)
+        duration = rise_tiles * 0.5 + 3.0
+        return {"ctrl": {direction: True}, "duration": duration}
     if name in _SIMPLE:
         return _SIMPLE[name]
     fn = _DYNAMIC.get(name)
