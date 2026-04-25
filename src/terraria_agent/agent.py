@@ -229,7 +229,6 @@ def run() -> None:
         if tactician.is_idle() and now - tactician_last >= _TACTICIAN_INTERVAL:
             tactician_last = now
             macro_text = serialize_macro(state, goal=tactician.goal, visited_biomes=visited_biomes)
-            print(f"\n[tactician 触发]\n{macro_text}")
             tactician.start(macro_text)
 
         reason = _safety_interrupt(state)
@@ -250,13 +249,13 @@ def run() -> None:
                     if resolved:
                         ctrl = resolved.get("ctrl", {})
                         duration = resolved.get("duration", duration)
-                        print(f"[决策] 思考={thought!r} skill={skill_name} 控制={ctrl} 持续={duration}s")
+                        print(f"[决策] {thought} → {skill_name} ({duration}s)")
                     else:
-                        print(f"[决策] 思考={thought!r} skill={skill_name} 未找到，忽略")
+                        print(f"[决策] {thought} → {skill_name} 未找到")
                         ctrl = {}
                 else:
                     ctrl = decision.get("控制", {})
-                    print(f"[决策] 思考={thought!r} 控制={ctrl} 持续={duration}s")
+                    print(f"[决策] {thought} → inline ({duration}s)")
                 if ctrl:
                     current_ctrl = ctrl
                     deadline = now + duration
@@ -271,7 +270,7 @@ def run() -> None:
 
             if trigger_reason:
                 state_text = serialize(state)
-                print(f"\n[触发:{trigger_reason}]\n{state_text}")
+                print(f"[触发:{trigger_reason}]")
                 llm_thread = threading.Thread(
                     target=llm_worker, args=(state_text, trigger_reason), daemon=True
                 )
