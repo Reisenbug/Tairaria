@@ -22,7 +22,7 @@ from terraria_agent.tactician import Tactician
 _EXEC_TICK = 0.2
 _TILE = 16.0
 _STUCK_SECONDS = 2.0
-_STUCK_SPEED_THRESHOLD = 0.5 * _TILE
+_STUCK_SPEED_THRESHOLD = 0.5
 _HP_DROP_THRESHOLD = 0.4
 _TACTICIAN_INTERVAL = 60.0
 
@@ -53,10 +53,9 @@ class TriggerDetector:
     def check(self, state: GameState, current_ctrl: dict, now: float) -> str | None:
         p = state.player
 
-        # 2. 卡住检测
-        has_move = any(current_ctrl.get(d) for d in ("left", "right", "up", "down"))
-        speed = (p.velocity[0] ** 2 + p.velocity[1] ** 2) ** 0.5
-        if has_move and speed < _STUCK_SPEED_THRESHOLD:
+        has_horizontal = current_ctrl.get("left") or current_ctrl.get("right")
+        on_ground = abs(p.velocity[1]) < 0.1
+        if has_horizontal and on_ground and abs(p.velocity[0]) < _STUCK_SPEED_THRESHOLD:
             if self._moving_since is None:
                 self._moving_since = now
             elif now - self._moving_since >= _STUCK_SECONDS:
