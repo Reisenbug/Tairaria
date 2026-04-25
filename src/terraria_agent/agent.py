@@ -202,6 +202,7 @@ def run() -> None:
     pending_lock = threading.Lock()
     visited_biomes: list[str] = []
     tactician_last: float = 0.0
+    _prev_overhead: bool = False
 
     def llm_worker(state_text: str, trigger_reason: str) -> None:
         nonlocal pending
@@ -276,18 +277,12 @@ def run() -> None:
                 )
                 llm_thread.start()
 
-        if now >= deadline:
-            cave = cave_detect(state)
-            if cave:
-                _, cave_dir, walk_back, rise_tiles = cave
-                print(f"[cave] dir={cave_dir} walk_back={walk_back} rise_tiles={rise_tiles}")
-                import pyautogui
-                if state.smart_cursor:
-                    pyautogui.press("ctrl")
-                controller.fire_skill("cave_bypass", cave_dir, rise_tiles=rise_tiles, walk_back=walk_back)
-                skill_duration = walk_back * 0.2 + rise_tiles * 0.5 + 4.0
-                deadline = now + skill_duration
-                current_ctrl = {}
+        cave = cave_detect(state)
+        if cave:
+            _, cave_dir, walk_back, rise_tiles = cave
+            print(f"[cave 停下] dir={cave_dir} walk_back={walk_back} rise_tiles={rise_tiles}")
+            current_ctrl = {}
+            deadline = now + 999
 
         reflex_ctrl = reflex_check(state)
         if reflex_ctrl:
