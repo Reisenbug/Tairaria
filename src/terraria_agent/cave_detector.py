@@ -74,14 +74,16 @@ def detect(state: GameState) -> tuple[bool, str, int, int] | None:
 
     direction = p.direction
     sign = 1 if direction == "right" else -1
-    thicknesses = [_roof_thickness(tw, pcx + sign * i, head_y) for i in range(1, 16)]
-    if max(thicknesses) >= _THICK_THRESHOLD:
-        edge_i = _find_overhead_edge(tw, pcx, head_y, sign)
-        walk_back = max(1, edge_i + 2)
-        roof_dy = next((dy for dy in range(1, 16)
-                       if (t := tw.tile_at(pcx, head_y - dy)) and t.solid and t.type not in _CLOUD_TYPES), 7)
-        rise_tiles = roof_dy - 7
-        if rise_tiles >= 2:
-            return True, direction, walk_back, rise_tiles
+    found = any(_roof_thickness(tw, pcx + sign * i, head_y) >= _THICK_THRESHOLD for i in range(1, 16))
+    if not found:
+        return None
+
+    edge_i = _find_overhead_edge(tw, pcx, head_y, sign)
+    walk_back = max(1, edge_i + 2)
+    roof_dy = next((dy for dy in range(1, 16)
+                   if (t := tw.tile_at(pcx, head_y - dy)) and t.solid and t.type not in _CLOUD_TYPES), 7)
+    rise_tiles = roof_dy - 7
+    if rise_tiles >= 2:
+        return True, direction, walk_back, rise_tiles
 
     return None
