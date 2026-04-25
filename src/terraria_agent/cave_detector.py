@@ -82,8 +82,5 @@ def detect(state: GameState) -> tuple[bool, str, int, int] | None:
     walk_back = max(1, edge_i + 2)
     roof_dy = next((dy for dy in range(1, 16)
                    if (t := tw.tile_at(pcx, head_y - dy)) and t.solid and t.type not in _CLOUD_TYPES), 7)
-    rise_tiles = roof_dy - 7
-    if rise_tiles >= 2:
-        return True, direction, walk_back, rise_tiles
-
-    return None
+    rise_tiles = max(1, roof_dy - 7)
+    return True, direction, walk_back, rise_tiles
