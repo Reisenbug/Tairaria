@@ -64,7 +64,7 @@ if __name__ == "__main__":
                 frames = json.loads(raw)
                 skill = {"smart_cursor": False, "frames": frames}
                 with open(outfile, "w") as f:
-                    json.dump(skill, f)
+                    json.dump(skill, f, indent=2)
                 print(f"■ 停止，{len(frames)} 帧 → {outfile}")
             elif c == 'p':
                 if frames:
