@@ -25,11 +25,40 @@ def http_post(path, data=b""):
     with urllib.request.urlopen(req, timeout=5) as r:
         return r.read().decode()
 
+def expand_frames(frames):
+    result = []
+    for f in frames:
+        n = f.get("repeat", 1)
+        base = {k: v for k, v in f.items() if k != "repeat"}
+        result.extend([base] * n)
+    return result
+
 def play_frames(frames):
-    print(f"回放 {len(frames)} 帧 → mod 端执行...")
-    payload = json.dumps(frames).encode()
+    expanded = expand_frames(frames)
+    print(f"回放 {len(expanded)} 帧 → mod 端执行...")
+    payload = json.dumps(expanded).encode()
     result = http_post("/replay", payload)
     print(f"回放：{result}")
+
+def compress_frames(frames):
+    if not frames:
+        return []
+    result = []
+    count = 1
+    for i in range(1, len(frames)):
+        if frames[i] == frames[i - 1]:
+            count += 1
+        else:
+            entry = dict(frames[i - 1])
+            if count > 1:
+                entry["repeat"] = count
+            result.append(entry)
+            count = 1
+    entry = dict(frames[-1])
+    if count > 1:
+        entry["repeat"] = count
+    result.append(entry)
+    return result
 
 def load_skill(path):
     data = json.load(open(path))
@@ -62,10 +91,11 @@ if __name__ == "__main__":
                 recording = False
                 raw = http_post("/record_stop")
                 frames = json.loads(raw)
-                skill = {"smart_cursor": False, "frames": frames}
+                compressed = compress_frames(frames)
+                skill = {"smart_cursor": False, "frames": compressed}
                 with open(outfile, "w") as f:
                     json.dump(skill, f, indent=2)
-                print(f"■ 停止，{len(frames)} 帧 → {outfile}")
+                print(f"■ 停止，{len(frames)} 帧 → {len(compressed)} 条 → {outfile}")
             elif c == 'p':
                 if frames:
                     threading.Thread(target=play_frames, args=(frames,), daemon=True).start()
