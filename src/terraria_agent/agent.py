@@ -198,7 +198,7 @@ def _poll_walk_done(timeout: float = 10.0) -> bool:
 def _cave_bypass_worker(controller, cave_dir: str) -> None:
     opposite = "left" if cave_dir == "right" else "right"
     print(f"[cave bypass] walk_to_edge dir={opposite}")
-    controller.walk_to_edge(opposite, extra_tiles=0.5)
+    controller.walk_to_edge(opposite, extra_tiles=1.0)
     if not _poll_walk_done():
         print("[cave bypass] walk_to_edge 超时")
         return
