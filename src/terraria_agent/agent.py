@@ -162,6 +162,54 @@ def _parse_actions(ctrl: dict, state: GameState) -> list[GameAction]:
     return actions
 
 
+_SKILL_DIR = __import__("pathlib").Path(__file__).parent.parent.parent / "skills"
+
+def _load_skill_frames(name: str) -> list:
+    import json
+    path = _SKILL_DIR / f"{name}.json"
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text())
+    if isinstance(data, dict):
+        frames = data.get("frames", [])
+    else:
+        frames = data
+    result = []
+    for f in frames:
+        n = f.get("repeat", 1)
+        base = {k: v for k, v in f.items() if k != "repeat"}
+        result.extend([base] * n)
+    return result
+
+def _poll_walk_done(timeout: float = 10.0) -> bool:
+    import json, urllib.request
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(0.1)
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:17878/state", timeout=0.5) as r:
+                data = json.loads(r.read())
+            if data.get("walk_to_edge_done"):
+                return True
+        except Exception:
+            pass
+    return False
+
+def _cave_bypass_worker(controller, cave_dir: str) -> None:
+    opposite = "left" if cave_dir == "right" else "right"
+    print(f"[cave bypass] walk_to_edge dir={opposite}")
+    controller.walk_to_edge(opposite, extra_tiles=0.5)
+    if not _poll_walk_done():
+        print("[cave bypass] walk_to_edge 超时")
+        return
+    skill_name = f"cave_bypass_{cave_dir}"
+    frames = _load_skill_frames(skill_name)
+    if not frames:
+        print(f"[cave bypass] 找不到 skill 文件: {skill_name}.json")
+        return
+    print(f"[cave bypass] replay {len(frames)} 帧")
+    controller.replay_skill(frames)
+
 def _safety_interrupt(state) -> str | None:
     if state.player.hp < state.player.max_hp * 0.3:
         return "血量低"
@@ -280,9 +328,14 @@ def run() -> None:
         cave = cave_detect(state)
         if cave:
             _, cave_dir, walk_back, rise_tiles = cave
-            print(f"[cave 停下] dir={cave_dir} walk_back={walk_back} rise_tiles={rise_tiles}")
+            print(f"[cave bypass] dir={cave_dir}")
             current_ctrl = {}
             deadline = now + 999
+            threading.Thread(
+                target=_cave_bypass_worker,
+                args=(controller, cave_dir),
+                daemon=True,
+            ).start()
 
         reflex_ctrl = reflex_check(state)
         if reflex_ctrl:

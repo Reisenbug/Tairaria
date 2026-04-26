@@ -24,6 +24,8 @@ _INTERACT_URL = "http://127.0.0.1:17878/interact"
 _PLACE_URL = "http://127.0.0.1:17878/place"
 _PLACE_STOP_URL = "http://127.0.0.1:17878/place_stop"
 _SKILL_URL = "http://127.0.0.1:17878/skill"
+_WALK_TO_EDGE_URL = "http://127.0.0.1:17878/walk_to_edge"
+_REPLAY_URL = "http://127.0.0.1:17878/replay"
 
 
 class ModController:
@@ -98,6 +100,12 @@ class ModController:
 
         if ctrl:
             self._post_control(ctrl)
+
+    def walk_to_edge(self, direction: str, extra_tiles: float = 0.5) -> None:
+        self._http_post_json(_WALK_TO_EDGE_URL, {"direction": direction, "extra_tiles": extra_tiles})
+
+    def replay_skill(self, frames: list) -> None:
+        self._http_post_json(_REPLAY_URL, frames)
 
     def fire_skill(self, name: str, direction: str = "right", rise_tiles: int = 8, walk_back: int = 2) -> None:
         self._http_post_json(_SKILL_URL, {"name": name, "direction": direction, "rise_tiles": rise_tiles, "walk_back": walk_back})
