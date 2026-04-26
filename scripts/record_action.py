@@ -43,9 +43,11 @@ if __name__ == "__main__":
         sys.exit(1)
     outfile = sys.argv[1]
 
-    frames = []
+    frames = load_skill(outfile) if os.path.exists(outfile) else []
     recording = False
 
+    if frames:
+        print(f"已加载 {len(frames)} 帧来自 {outfile}")
     print("按 I 开始录制 | O 停止 | P 回放 | L 退出")
 
     def on_press(key):
