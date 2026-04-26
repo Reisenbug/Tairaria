@@ -84,7 +84,6 @@ class AgentOrchestrator:
         self._commander_warned = False
         self._task_queue = TaskQueue(goal="idle", task_queue=[])
         self._looted_chests: set[tuple[int, int]] = set()
-        self._smart_cursor = False
         self._oneshot: Node | None = None
         self._tick_count = 0
         self._tps = 0.0
@@ -159,7 +158,6 @@ class AgentOrchestrator:
             game_state=game_state,
             task_queue=self._task_queue,
             dt=self._interval,
-            smart_cursor=game_state.smart_cursor,
             looted_chests=self._looted_chests,
             active_goal=self._task_queue.active_goal,
         )
@@ -339,18 +337,6 @@ class AgentOrchestrator:
         if lower == "clear":
             self._task_queue = TaskQueue(goal=self._task_queue.goal, task_queue=[])
             self._bridge.log("[cmd] task queue cleared")
-            return
-        if lower in ("smart_cursor on", "smartcursor on", "sc on"):
-            self._smart_cursor = True
-            self._bridge.log("[cmd] smart_cursor=ON")
-            return
-        if lower in ("smart_cursor off", "smartcursor off", "sc off"):
-            self._smart_cursor = False
-            self._bridge.log("[cmd] smart_cursor=OFF")
-            return
-        if lower in ("smart_cursor", "smartcursor", "sc"):
-            self._smart_cursor = not self._smart_cursor
-            self._bridge.log(f"[cmd] smart_cursor={'ON' if self._smart_cursor else 'OFF'}")
             return
         if lower in ("mine", "mine_forward", "mineforward"):
             self._oneshot = MineForward(name="MineForward(oneshot)")

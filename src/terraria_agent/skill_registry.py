@@ -152,9 +152,6 @@ def execute(name: str, state: GameState, controller=None) -> dict | None:
     if name in _MOD_SKILLS:
         if controller is None:
             return None
-        import pyautogui
-        if state.smart_cursor:
-            pyautogui.press("ctrl")
         direction = state.player.direction
         rise_tiles = 1
         walk_back = 2

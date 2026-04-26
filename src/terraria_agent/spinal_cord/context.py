@@ -22,7 +22,6 @@ class TickContext:
     interrupt_reason: str = ""
     dt: float = 0.2
     bt_trace: list[str] = field(default_factory=list)
-    smart_cursor: bool = False
     exclusive_active: bool = False
     looted_chests: set = field(default_factory=set)
     combat_mode: CombatMode = CombatMode.CAUTIOUS

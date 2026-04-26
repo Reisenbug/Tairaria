@@ -79,9 +79,6 @@ class ModController:
                         })
                 case ActionType.PLACE_STOP:
                     self._http_fire(_PLACE_STOP_URL)
-                case ActionType.KEY_PRESS:
-                    if a.item == "smart_cursor":
-                        pyautogui.press("ctrl")
                 case ActionType.LOOT_ALL:
                     self._http_fire(_LOOT_ALL_URL)
                 case ActionType.QUICK_HEAL:

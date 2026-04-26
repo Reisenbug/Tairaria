@@ -74,8 +74,6 @@ class ShakeTree(Action):
             return Status.SUCCESS
         if not _ensure_axe(ctx):
             return Status.SUCCESS
-        if not ctx.game_state.smart_cursor:
-            ctx.action_buffer.append(GameAction(action=ActionType.KEY_PRESS, item="smart_cursor"))
         facing = ctx.game_state.player.direction
         s = 1.0 if facing == "right" else -1.0
         target = tile_offset_world(ctx.game_state.player, s * 2.0, 0.0)
@@ -134,15 +132,6 @@ class PickUpValuableDrop(Action):
         ctx.action_buffer.append(GameAction(action=ActionType.MOVE, direction="right" if nearest.pos[0] > ctx.game_state.player.pos[0] else "left"))
         ctx.action_buffer.append(GameAction(action=ActionType.PICK_UP))
         return Status.RUNNING if nearest.distance > 10.0 else Status.SUCCESS
-
-
-class EnsureSmartCursorOn(Action):
-    def execute(self, ctx: TickContext) -> Status:
-        if ctx.game_state.smart_cursor:
-            return Status.SUCCESS
-        ctx.action_buffer.append(GameAction(action=ActionType.KEY_PRESS, item="smart_cursor"))
-        ctx.bt_trace.append("SmartCursor->ON")
-        return Status.RUNNING
 
 
 class OpenChest(Action):

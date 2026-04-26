@@ -8,10 +8,10 @@ from terraria_agent.spinal_cord.bt.core import Node, Status
 from terraria_agent.spinal_cord.bt.leaves import Condition
 from terraria_agent.spinal_cord.bt.decorators import ForceSuccess
 from terraria_agent.spinal_cord.conditions.environment import IsCliffEdge, IsCaveEntrance, HasChestNearby
-from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveRight, MoveToObject, BuildBridge, JumpOverCave, PillarJump
+from terraria_agent.spinal_cord.actions.movement import MoveLeft, MoveRight, MoveToObject, BuildBridge, PillarJump
 from terraria_agent.spinal_cord.actions.interaction import (
     ShakeTree, ChopBigTree, BigTreeChopped, PickUpValuableDrop,
-    OpenChest, EnsureSmartCursorOn, LootAll, MarkChestLooted,
+    OpenChest, LootAll, MarkChestLooted,
 )
 from terraria_agent.spinal_cord.actions.crafting import CraftPlatforms
 
@@ -65,7 +65,6 @@ def _build_goal_subtree(goal_kind: str) -> Node | None:
         return Sequence(
             children=[
                 MoveToObject("chest", reach_tiles=3.0),
-                EnsureSmartCursorOn(),
                 OpenChest(),
                 LootAll(),
                 MarkChestLooted(),
@@ -81,7 +80,6 @@ def _build_task_subtree(trigger: str, action: str) -> Node | None:
             children=[
                 TriggerCondition(TRIGGER_REGISTRY["chest_nearby"], name="HasChest"),
                 MoveToObject("chest"),
-                EnsureSmartCursorOn(),
                 OpenChest(),
                 LootAll(),
                 MarkChestLooted(),
@@ -146,13 +144,7 @@ class StatefulTaskSelector(Node):
         self._cave_reflex = Sequence(
             children=[
                 IsCaveEntrance(name="CaveEntranceAhead"),
-                Selector(
-                    children=[
-                        JumpOverCave(name="SkirtCave"),
-                        PillarJump(name="PillarJumpFallback"),
-                    ],
-                    name="SkirtOrPillar",
-                ),
+                PillarJump(name="PillarJump"),
             ],
             name="CaveReflex",
         )
