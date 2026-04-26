@@ -31,6 +31,12 @@ def play_frames(frames):
     result = http_post("/replay", payload)
     print(f"回放：{result}")
 
+def load_skill(path):
+    data = json.load(open(path))
+    if isinstance(data, dict):
+        return data.get("frames", [])
+    return data
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(__doc__)
@@ -40,7 +46,7 @@ if __name__ == "__main__":
     frames = []
     recording = False
 
-    print("按 I 开始录制 | O 停止 | P 回放 | Q 退出")
+    print("按 I 开始录制 | O 停止 | P 回放 | L 退出")
 
     def on_press(key):
         global recording, frames
@@ -54,15 +60,16 @@ if __name__ == "__main__":
                 recording = False
                 raw = http_post("/record_stop")
                 frames = json.loads(raw)
+                skill = {"smart_cursor": False, "frames": frames}
                 with open(outfile, "w") as f:
-                    json.dump(frames, f)
+                    json.dump(skill, f)
                 print(f"■ 停止，{len(frames)} 帧 → {outfile}")
             elif c == 'p':
                 if frames:
                     threading.Thread(target=play_frames, args=(frames,), daemon=True).start()
                 else:
                     print("没有录制内容")
-            elif c == 'q':
+            elif c == 'l':
                 return False
         except AttributeError:
             pass
