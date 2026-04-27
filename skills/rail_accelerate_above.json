@@ -1,0 +1,31 @@
+{
+  "smart_cursor": false,
+  "frames": [
+    {
+      "use_item": true,
+      "sc": 0,
+      "slot": 9,
+      "mx": 0.0,
+      "my": -4.2,
+      "repeat": 2
+    },
+    {
+      "use_item": true,
+      "use_tile": true,
+      "sc": 0,
+      "slot": 9,
+      "mx": 0.0,
+      "my": -4.2
+    },
+    {
+      "jump": true,
+      "use_item": true,
+      "use_tile": true,
+      "sc": 0,
+      "slot": 9,
+      "mx": 0.0,
+      "my": -4.2,
+      "repeat": 4
+    }
+  ]
+}

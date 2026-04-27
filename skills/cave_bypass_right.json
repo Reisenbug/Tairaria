@@ -2,13 +2,6 @@
   "smart_cursor": false,
   "frames": [
     {
-      "sc": 0,
-      "slot": 2,
-      "mx": 1.7,
-      "my": 0.8,
-      "repeat": 14
-    },
-    {
       "use_item": true,
       "sc": 0,
       "slot": 2,

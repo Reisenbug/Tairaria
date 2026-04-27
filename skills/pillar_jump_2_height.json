@@ -2,13 +2,6 @@
   "smart_cursor": false,
   "frames": [
     {
-      "sc": 0,
-      "slot": 2,
-      "mx": -0.1,
-      "my": 1.7,
-      "repeat": 25
-    },
-    {
       "jump": true,
       "sc": 0,
       "slot": 2,
@@ -135,13 +128,6 @@
       "mx": -0.1,
       "my": 1.7,
       "repeat": 23
-    },
-    {
-      "sc": 0,
-      "slot": 2,
-      "mx": -0.1,
-      "my": 1.7,
-      "repeat": 40
     }
   ]
 }
