@@ -17,6 +17,7 @@ _PLACE_STOP_URL = "http://127.0.0.1:17878/place_stop"
 _SKILL_URL = "http://127.0.0.1:17878/skill"
 _WALK_TO_EDGE_URL = "http://127.0.0.1:17878/walk_to_edge"
 _REPLAY_URL = "http://127.0.0.1:17878/replay"
+_FIGHT_URL = "http://127.0.0.1:17878/fight"
 
 
 class ModController:
@@ -67,6 +68,12 @@ class ModController:
                     pass
 
         self._post_control(ctrl)
+
+    def fight_start(self, max_dist: float = 20.0) -> None:
+        self._http_post_json(_FIGHT_URL, {"active": True, "max_dist": max_dist})
+
+    def fight_stop(self) -> None:
+        self._http_post_json(_FIGHT_URL, {"active": False})
 
     def walk_to_edge(self, direction: str, extra_tiles: float = 0.5) -> None:
         self._http_post_json(_WALK_TO_EDGE_URL, {"direction": direction, "extra_tiles": extra_tiles})
