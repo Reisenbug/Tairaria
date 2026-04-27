@@ -92,14 +92,27 @@ class GoalExecutor:
     def _tick_chop_tree(self, state: GameState) -> dict:
         obj = self._find_nearest("tree", state)
         if obj is None:
-            print("[goal] chop_tree 完成（树消失）")
-            self._finish("done")
+            if self._phase == "chopping":
+                print("[goal] 树消失，开始捡掉落物")
+                self._phase = "looting_drops"
+                self._loot_ticks = 0
+                return {}
+            self._finish("not_found")
+            return {}
+
+        if self._phase == "looting_drops":
+            self._loot_ticks = getattr(self, "_loot_ticks", 0) + 1
+            self._ctrl._http_fire("http://127.0.0.1:17878/loot_all")
+            if self._loot_ticks >= 5:
+                print("[goal] chop_tree 完成（loot 结束）")
+                self._finish("done")
             return {}
         if self._target_abs_x is None:
             self._target_abs_x = obj.pos[0]
 
         dist = self._dist_to(obj, state)
         if dist <= _ARRIVE_DIST:
+            self._phase = "chopping"
             p = state.player
             pcx = p.pos[0] + p.width / 2.0
             pcy = p.pos[1] + p.height / 2.0
