@@ -49,6 +49,12 @@ class ModController:
                         ctrl["selected_slot"] = a.slot
                 case ActionType.PLACE_BLOCK:
                     ctrl["use_item"] = True
+                case ActionType.INTERACT_MOD:
+                    ctrl["use_tile"] = True
+                    if a.mx is not None:
+                        ctrl["mx"] = a.mx
+                    if a.my is not None:
+                        ctrl["my"] = a.my
                 case ActionType.INTERACT:
                     if a.tile is not None:
                         self._http_post_json(_INTERACT_URL, {"tile_x": int(a.tile[0]), "tile_y": int(a.tile[1])})

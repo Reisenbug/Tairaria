@@ -22,6 +22,7 @@ class ActionType(str, Enum):
     LOOT_ALL = "loot_all"
     QUICK_HEAL = "quick_heal"
     USE_ITEM_MOD = "use_item_mod"
+    INTERACT_MOD = "interact_mod"
     NONE = "none"
 
 
