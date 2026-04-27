@@ -216,6 +216,7 @@ class WorldObject(BaseModel):
     pos: tuple[float, float]
     tile_pos: tuple[int, int] = (0, 0)
     distance: float = 0.0
+    height: int = 0
 
 
 class GameState(BaseModel):

@@ -366,11 +366,15 @@ class TerraBlindClient:
             opos = o.get("pos") or {}
             wpos = (float(opos.get("x", 0.0)), float(opos.get("y", 0.0)))
             dist = world_distance_tiles(pcenter, wpos)
+            h = int(o.get("height", 0))
+            if str(o.get("name", "")) == "tree" and h <= 1:
+                continue
             objects.append(WorldObject(
                 type=str(o.get("name", "")),
                 pos=wpos,
                 tile_pos=(int(o.get("tx", 0)), int(o.get("ty", 0))),
                 distance=dist,
+                height=h,
             ))
 
         dropped_items: list[DroppedItem] = []
