@@ -55,7 +55,14 @@ def _skill_fight_nearest(state: GameState) -> dict | None:
     if not state.enemies:
         return None
     nearest = min(state.enemies, key=lambda e: e.distance)
-    ctrl: dict = {"use_item": True, "screen_xy": (nearest.screen_x, nearest.screen_y)}
+    p = state.player
+    pcx = p.pos[0] + p.width / 2.0
+    pcy = p.pos[1] + p.height / 2.0
+    ncx = nearest.pos[0] + nearest.width / 2.0
+    ncy = nearest.pos[1] + nearest.height / 2.0
+    mx = (ncx - pcx) / _TILE
+    my = (ncy - pcy) / _TILE
+    ctrl: dict = {"use_item": True, "mx": mx, "my": my}
     weapon_slot = next(
         (s.slot_index for s in state.inventory_slots[:10] if s.is_weapon),
         None,

@@ -21,6 +21,7 @@ class ActionType(str, Enum):
     KEY_PRESS = "key_press"
     LOOT_ALL = "loot_all"
     QUICK_HEAL = "quick_heal"
+    USE_ITEM_MOD = "use_item_mod"
     NONE = "none"
 
 
@@ -36,6 +37,8 @@ class GameAction(BaseModel):
     dy: Optional[int] = None
     duration_frames: Optional[int] = None
     smart_cursor: Optional[bool] = None
+    mx: Optional[float] = None
+    my: Optional[float] = None
 
 
 class ActionBundle(BaseModel):

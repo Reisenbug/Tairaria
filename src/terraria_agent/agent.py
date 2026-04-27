@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 import threading
 
-from pynput import keyboard as _kb
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -142,19 +141,20 @@ def _parse_actions(ctrl: dict, state: GameState) -> list[GameAction]:
         actions.append(GameAction(action=ActionType.JUMP))
 
     if ctrl.get("use_item"):
-        screen_xy = ctrl.get("screen_xy")
-        if screen_xy is not None:
-            target = screen_xy
+        mx = ctrl.get("mx")
+        my = ctrl.get("my")
+        if mx is not None and my is not None:
+            actions.append(GameAction(action=ActionType.USE_ITEM_MOD, mx=float(mx), my=float(my)))
         else:
-            rel_x = ctrl.get("mouse_x")
-            rel_y = ctrl.get("mouse_y")
-            if rel_x is not None and rel_y is not None:
-                pcx, pcy = player_center_world(state.player)
-                world_xy = (pcx + float(rel_x) * _TILE, pcy + float(rel_y) * _TILE)
-                target = world_to_screen(world_xy, state.camera)
-            else:
-                target = None
-        actions.append(GameAction(action=ActionType.ATTACK, target=target))
+            screen_xy = ctrl.get("screen_xy")
+            if screen_xy is None:
+                rel_x = ctrl.get("mouse_x")
+                rel_y = ctrl.get("mouse_y")
+                if rel_x is not None and rel_y is not None:
+                    pcx, pcy = player_center_world(state.player)
+                    world_xy = (pcx + float(rel_x) * _TILE, pcy + float(rel_y) * _TILE)
+                    screen_xy = world_to_screen(world_xy, state.camera)
+            actions.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
 
     if not actions:
         actions.append(GameAction(action=ActionType.NONE))
@@ -222,28 +222,7 @@ def run() -> None:
     llm = LLMClient()
     tactician = Tactician()
     trigger = TriggerDetector()
-    print("[agent] 启动 — ctrl+c 停止 | ctrl+cmd+b 暂停/恢复鼠标")
-
-    def _on_hotkey():
-        paused = controller.toggle_mouse()
-        print("[agent] 鼠标已" + ("暂停" if paused else "恢复"))
-
-    _hotkey = _kb.HotKey(_kb.HotKey.parse('<ctrl>+<cmd>+b'), _on_hotkey)
-
-    def _on_key(key):
-        try:
-            _hotkey.press(key)
-        except Exception:
-            pass
-
-    def _on_release(key):
-        try:
-            _hotkey.release(key)
-        except Exception:
-            pass
-
-    _listener = _kb.Listener(on_press=_on_key, on_release=_on_release, suppress=False)
-    _listener.start()
+    print("[agent] 启动 — ctrl+c 停止")
 
     current_ctrl: dict = {"right": True}
     pending: dict | None = None
