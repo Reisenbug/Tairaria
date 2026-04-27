@@ -129,6 +129,8 @@ class Enemy(BaseModel):
     boss: bool = False
     distance: float = 0.0
     threat: EnemyThreat = EnemyThreat.WEAK
+    screen_x: float = 0.0
+    screen_y: float = 0.0
 
 
 class TownNpc(BaseModel):

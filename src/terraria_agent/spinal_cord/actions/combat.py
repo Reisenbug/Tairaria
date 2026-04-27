@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from terraria_agent.geometry import world_to_screen
 from terraria_agent.models.actions import GameAction, ActionType
 from terraria_agent.spinal_cord.bt.core import Status
 from terraria_agent.spinal_cord.bt.leaves import Action
@@ -20,8 +19,7 @@ class AttackNearest(Action):
         if held is None or not held.is_weapon:
             return Status.FAILURE
         nearest = min(ctx.game_state.enemies, key=lambda e: e.distance)
-        screen_xy = world_to_screen(nearest.pos, ctx.game_state.camera)
-        ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=screen_xy))
+        ctx.action_buffer.append(GameAction(action=ActionType.ATTACK, target=(nearest.screen_x, nearest.screen_y)))
         return Status.SUCCESS
 
 

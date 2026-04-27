@@ -325,6 +325,8 @@ class TerraBlindClient:
                 boss=boss,
                 distance=dist,
                 threat=threat,
+                screen_x=float(e.get("sx", 0.0)),
+                screen_y=float(e.get("sy", 0.0)),
             ))
 
         town_npcs: list[TownNpc] = []
