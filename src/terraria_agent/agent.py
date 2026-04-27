@@ -17,6 +17,7 @@ from terraria_agent.reflex import check as reflex_check
 from terraria_agent.skill_registry import execute as skill_execute
 from terraria_agent.state_serializer import serialize, serialize_macro
 from terraria_agent.tactician import Tactician
+from terraria_agent.goal_executor import GoalExecutor
 
 _EXEC_TICK = 0.2
 _TILE = 16.0
@@ -219,6 +220,7 @@ def run() -> None:
     llm = LLMClient()
     tactician = Tactician()
     trigger = TriggerDetector()
+    goal_exec = GoalExecutor(controller)
     print("[agent] 启动 — ctrl+c 停止")
 
     current_ctrl: dict = {"right": True}
@@ -268,8 +270,20 @@ def run() -> None:
                 decision = pending
                 pending = None
                 thought = decision.get("思考", "")
-                duration = float(decision.get("持续秒数", 1.0))
-                skill_name = decision.get("skill")
+                duration = float(decision.get("持续秒数", _DEFAULT_DEADLINE))
+                goal_name = decision.get("goal")
+                skill_name = decision.get("skill") if not goal_name else None
+                if goal_name:
+                    target = decision.get("target", {})
+                    timeout = float(decision.get("timeout", 15.0))
+                    def _on_goal_done(result: str) -> None:
+                        print(f"[goal] 完成: {result}")
+                        nonlocal deadline
+                        deadline = 0.0
+                    goal_exec.start(goal_name, target, timeout, _on_goal_done)
+                    current_ctrl = {}
+                    deadline = now + timeout + 2.0
+                    print(f"[决策] {thought} → goal:{goal_name} target={target}")
                 _FIGHT_SKILLS = {"fight_nearest", "fight_moving_right", "fight_moving_left"}
                 if skill_name in _FIGHT_SKILLS:
                     controller.fight_start()
@@ -333,6 +347,9 @@ def run() -> None:
         reflex_ctrl = reflex_check(state)
         if reflex_ctrl:
             actions = _parse_actions(reflex_ctrl, state)
+        elif goal_exec.active:
+            goal_ctrl = goal_exec.tick(state)
+            actions = _parse_actions(goal_ctrl, state) if goal_ctrl else [GameAction(action=ActionType.NONE)]
         elif current_ctrl:
             actions = _parse_actions(current_ctrl, state)
         else:
