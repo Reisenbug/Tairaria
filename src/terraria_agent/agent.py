@@ -230,6 +230,7 @@ def run() -> None:
     visited_biomes: list[str] = []
     tactician_last: float = 0.0
     _prev_overhead: bool = False
+    _fight_deadline: float = 0.0
 
     def llm_worker(state_text: str, trigger_reason: str) -> None:
         nonlocal pending
@@ -272,7 +273,19 @@ def run() -> None:
                 thought = decision.get("思考", "")
                 duration = float(decision.get("持续秒数", 1.0))
                 skill_name = decision.get("skill")
-                if skill_name:
+                _FIGHT_SKILLS = {"fight_nearest", "fight_moving_right", "fight_moving_left"}
+                if skill_name in _FIGHT_SKILLS:
+                    controller.fight_start()
+                    _fight_deadline = now + duration
+                    ctrl = {}
+                    if skill_name == "fight_moving_right":
+                        ctrl["right"] = True
+                    elif skill_name == "fight_moving_left":
+                        ctrl["left"] = True
+                    current_ctrl = ctrl
+                    deadline = now + duration
+                    print(f"[决策] {thought} → {skill_name} ({duration}s)")
+                elif skill_name:
                     resolved = skill_execute(skill_name, state, controller)
                     if resolved:
                         ctrl = resolved.get("ctrl", {})
@@ -303,6 +316,10 @@ def run() -> None:
                     target=llm_worker, args=(state_text, trigger_reason), daemon=True
                 )
                 llm_thread.start()
+
+        if _fight_deadline > 0 and now >= _fight_deadline:
+            controller.fight_stop()
+            _fight_deadline = 0.0
 
         cave = cave_detect(state)
         if cave:
