@@ -20,10 +20,11 @@ from terraria_agent.tactician import Tactician
 
 _EXEC_TICK = 0.2
 _TILE = 16.0
-_STUCK_SECONDS = 2.0
+_STUCK_SECONDS = 5.0
 _STUCK_SPEED_THRESHOLD = 0.5
 _HP_DROP_THRESHOLD = 0.4
 _TACTICIAN_INTERVAL = 60.0
+_DEFAULT_DEADLINE = 20.0
 
 _FRUITS = {
     "苹果", "杏", "葡萄柚", "柠檬", "桃子",
@@ -72,12 +73,8 @@ class TriggerDetector:
         self._prev_hp = p.hp
         self._prev_max_hp = p.max_hp
 
-        # 4. 新敌人进入视野
         cur_ids = {e.who for e in state.enemies}
-        new_enemies = cur_ids - self._prev_enemy_ids
         self._prev_enemy_ids = cur_ids
-        if new_enemies:
-            return "新敌人"
 
         # 5. 地形突变 flat → pit
         if self._prev_terrain == TerrainType.FLAT and state.terrain_ahead == TerrainType.PIT:
@@ -242,7 +239,7 @@ def run() -> None:
             pending = decision if decision else {}
 
     llm_thread: threading.Thread | None = None
-    deadline: float = 0.0
+    deadline: float = time.time() + _DEFAULT_DEADLINE
 
     while True:
         now = time.time()
@@ -299,7 +296,7 @@ def run() -> None:
                     print(f"[决策] {thought} → inline ({duration}s)")
                 if ctrl:
                     current_ctrl = ctrl
-                    deadline = now + duration
+                deadline = now + max(duration, _DEFAULT_DEADLINE)
 
         llm_idle = llm_thread is None or not llm_thread.is_alive()
         if llm_idle:
