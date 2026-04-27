@@ -113,6 +113,7 @@ class GoalExecutor:
         dist = self._dist_to(obj, state)
         if dist <= _ARRIVE_DIST:
             self._phase = "chopping"
+            axe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_axe), None)
             p = state.player
             pcx = p.pos[0] + p.width / 2.0
             pcy = p.pos[1] + p.height / 2.0
@@ -120,7 +121,10 @@ class GoalExecutor:
             tcy = obj.pos[1] + _TILE
             mx = (tcx - pcx) / _TILE
             my = (tcy - pcy) / _TILE
-            return {"use_item": True, "mx": mx, "my": my}
+            ctrl = {"use_item": True, "sc": 1, "mx": mx, "my": my}
+            if axe_slot is not None:
+                ctrl["selected_slot"] = axe_slot
+            return ctrl
         return self._walk_toward(obj, state)
 
     def _find_nearest(self, obj_type: str, state: GameState):

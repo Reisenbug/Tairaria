@@ -369,7 +369,11 @@ def run() -> None:
             actions = _parse_actions(reflex_ctrl, state)
         elif goal_exec.active:
             goal_ctrl = goal_exec.tick(state)
-            actions = _parse_actions(goal_ctrl, state) if goal_ctrl else [GameAction(action=ActionType.NONE)]
+            if goal_ctrl:
+                controller._post_control(goal_ctrl)
+                actions = []
+            else:
+                actions = [GameAction(action=ActionType.NONE)]
         elif current_ctrl:
             actions = _parse_actions(current_ctrl, state)
         else:
