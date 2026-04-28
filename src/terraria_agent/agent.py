@@ -230,7 +230,7 @@ def run() -> None:
     tactician_last: float = 0.0
     _prev_overhead: bool = False
     _fight_deadline: float = 0.0
-    _trees_chopped: int = 0
+    _trees_chopped = [0]
     _TREE_HEIGHT_MIN = 15
     _TREE_CHOP_LIMIT = 2
 
@@ -335,10 +335,10 @@ def run() -> None:
             controller.fight_stop()
             _fight_deadline = 0.0
 
-        if not goal_exec.active and _trees_chopped < _TREE_CHOP_LIMIT:
+        if not goal_exec.active and _trees_chopped[0] < _TREE_CHOP_LIMIT:
             big_trees = [o for o in state.objects if o.type == "tree" and o.height >= _TREE_HEIGHT_MIN]
             if big_trees:
-                _trees_chopped += 1
+                _trees_chopped[0] += 1
                 inv_before = dict(state.inventory)
                 def _on_tree_done(result: str) -> None:
                     nonlocal deadline
@@ -346,7 +346,7 @@ def run() -> None:
                         inv_after = state.inventory
                         gained = {k: inv_after.get(k, 0) - inv_before.get(k, 0)
                                   for k in inv_after if inv_after.get(k, 0) > inv_before.get(k, 0)}
-                        print(f"[tree] 砍完第{_trees_chopped}棵 gained={gained}")
+                        print(f"[tree] 砍完第{_trees_chopped[0]}棵 gained={gained}")
                         deadline = 0.0
                 goal_exec.start("chop_tree", {"type": "tree"}, timeout=30, on_done=_on_tree_done)
                 current_ctrl = {}
