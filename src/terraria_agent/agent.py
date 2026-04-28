@@ -355,14 +355,16 @@ def run() -> None:
             if big_trees:
                 _trees_chopped[0] += 1
                 inv_before = dict(state.inventory)
+                saved_ctrl = dict(current_ctrl)
                 def _on_tree_done(result: str) -> None:
-                    nonlocal deadline
+                    nonlocal deadline, current_ctrl
                     if "done" in result:
                         inv_after = state.inventory
                         gained = {k: inv_after.get(k, 0) - inv_before.get(k, 0)
                                   for k in inv_after if inv_after.get(k, 0) > inv_before.get(k, 0)}
                         print(f"[tree] 砍完第{_trees_chopped[0]}棵 gained={gained}")
                         organize_hotbar(state.inventory_slots)
+                        current_ctrl = saved_ctrl
                         deadline = 0.0
                 goal_exec.start("chop_tree", {"type": "tree"}, timeout=30, on_done=_on_tree_done)
                 current_ctrl = {}
