@@ -24,7 +24,7 @@ while True:
         time.sleep(0.2)
         continue
 
-    if _trees_chopped[0] >= _TREE_CHOP_LIMIT:
+    if _trees_chopped[0] >= _TREE_CHOP_LIMIT and not goal_exec.active:
         controller.release_all()
         print(f"已砍完{_TREE_CHOP_LIMIT}棵树，停止")
         break

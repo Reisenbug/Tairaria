@@ -90,6 +90,14 @@ class GoalExecutor:
         return self._walk_toward(obj, state)
 
     def _tick_chop_tree(self, state: GameState) -> dict:
+        if self._phase == "looting_drops":
+            self._loot_ticks = getattr(self, "_loot_ticks", 0) + 1
+            self._ctrl._http_fire("http://127.0.0.1:17878/loot_all")
+            if self._loot_ticks >= 5:
+                print("[goal] chop_tree 完成（loot 结束）")
+                self._finish("done")
+            return {}
+
         obj = self._find_nearest("tree", state, min_height=15)
         if obj is None:
             if self._phase == "chopping":
@@ -98,14 +106,6 @@ class GoalExecutor:
                 self._loot_ticks = 0
                 return {}
             self._finish("not_found")
-            return {}
-
-        if self._phase == "looting_drops":
-            self._loot_ticks = getattr(self, "_loot_ticks", 0) + 1
-            self._ctrl._http_fire("http://127.0.0.1:17878/loot_all")
-            if self._loot_ticks >= 5:
-                print("[goal] chop_tree 完成（loot 结束）")
-                self._finish("done")
             return {}
         if self._target_abs_x is None:
             self._target_abs_x = obj.pos[0]
@@ -136,6 +136,7 @@ class GoalExecutor:
             anchored = [o for o in candidates if abs(o.pos[0] - self._target_abs_x) < _TILE * 3]
             if anchored:
                 return min(anchored, key=lambda o: o.distance)
+            return None
         return min(candidates, key=lambda o: o.distance)
 
     def _dist_to(self, obj, state: GameState) -> float:
