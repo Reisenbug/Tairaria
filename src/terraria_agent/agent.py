@@ -253,6 +253,7 @@ def run() -> None:
 
     llm_thread: threading.Thread | None = None
     deadline: float = time.time() + _DEFAULT_DEADLINE
+    _prev_tool_weapon_slots: set[int] = set()
 
     while True:
         now = time.time()
@@ -269,6 +270,12 @@ def run() -> None:
             tactician_last = now
             macro_text = serialize_macro(state, goal=tactician.goal, visited_biomes=visited_biomes)
             tactician.start(macro_text)
+
+        cur_tool_weapon = {s.slot_index for s in state.inventory_slots
+                           if not s.is_empty and (s.is_weapon or s.is_axe or s.is_pickaxe)}
+        if cur_tool_weapon - _prev_tool_weapon_slots:
+            organize_hotbar(state.inventory_slots)
+        _prev_tool_weapon_slots = cur_tool_weapon
 
         reason = _safety_interrupt(state)
         if reason:
