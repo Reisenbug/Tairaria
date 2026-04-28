@@ -371,7 +371,8 @@ def run() -> None:
             goal_ctrl = goal_exec.tick(state)
             if goal_ctrl:
                 controller._post_control(goal_ctrl)
-                actions = []
+                time.sleep(_EXEC_TICK)
+                continue
             else:
                 actions = [GameAction(action=ActionType.NONE)]
         elif current_ctrl:

@@ -90,7 +90,7 @@ class GoalExecutor:
         return self._walk_toward(obj, state)
 
     def _tick_chop_tree(self, state: GameState) -> dict:
-        obj = self._find_nearest("tree", state)
+        obj = self._find_nearest("tree", state, min_height=15)
         if obj is None:
             if self._phase == "chopping":
                 print("[goal] 树消失，开始捡掉落物")
@@ -111,6 +111,7 @@ class GoalExecutor:
             self._target_abs_x = obj.pos[0]
 
         dist = self._dist_to(obj, state)
+        print(f"[chop] phase={self._phase} dist={dist:.1f} obj.pos={obj.pos} obj.height={obj.height}")
         if dist <= _ARRIVE_DIST:
             self._phase = "chopping"
             axe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_axe), None)
@@ -127,8 +128,8 @@ class GoalExecutor:
             return ctrl
         return self._walk_toward(obj, state)
 
-    def _find_nearest(self, obj_type: str, state: GameState):
-        candidates = [o for o in state.objects if o.type == obj_type]
+    def _find_nearest(self, obj_type: str, state: GameState, min_height: int = 0):
+        candidates = [o for o in state.objects if o.type == obj_type and o.height >= min_height]
         if not candidates:
             return None
         if self._target_abs_x is not None:
