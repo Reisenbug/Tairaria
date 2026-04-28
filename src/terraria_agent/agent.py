@@ -338,12 +338,11 @@ def run() -> None:
         if not goal_exec.active and _trees_chopped < _TREE_CHOP_LIMIT:
             big_trees = [o for o in state.objects if o.type == "tree" and o.height >= _TREE_HEIGHT_MIN]
             if big_trees:
-                target_tree = max(big_trees, key=lambda o: o.height)
+                _trees_chopped += 1
                 inv_before = dict(state.inventory)
                 def _on_tree_done(result: str) -> None:
-                    nonlocal _trees_chopped, deadline
+                    nonlocal deadline
                     if "done" in result:
-                        _trees_chopped += 1
                         inv_after = state.inventory
                         gained = {k: inv_after.get(k, 0) - inv_before.get(k, 0)
                                   for k in inv_after if inv_after.get(k, 0) > inv_before.get(k, 0)}
