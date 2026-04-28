@@ -111,7 +111,6 @@ class GoalExecutor:
             self._target_abs_x = obj.pos[0]
 
         dist = self._dist_to(obj, state)
-        print(f"[chop] phase={self._phase} dist={dist:.1f} obj.pos={obj.pos} obj.height={obj.height}")
         if dist <= _ARRIVE_DIST:
             self._phase = "chopping"
             axe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_axe), None)
