@@ -18,6 +18,7 @@ from terraria_agent.skill_registry import execute as skill_execute
 from terraria_agent.state_serializer import serialize, serialize_macro
 from terraria_agent.tactician import Tactician
 from terraria_agent.goal_executor import GoalExecutor
+from terraria_agent.hand.hotbar_organizer import organize_hotbar
 
 _EXEC_TICK = 0.2
 _TILE = 16.0
@@ -223,6 +224,13 @@ def run() -> None:
     goal_exec = GoalExecutor(controller)
     print("[agent] 启动 — ctrl+c 停止")
 
+    first_state = None
+    while first_state is None or first_state.player.hp == 0:
+        first_state = perception.detect(frame=None)
+        time.sleep(0.5)
+    organize_hotbar(first_state.inventory_slots)
+    print("[agent] hotbar 整理完成")
+
     current_ctrl: dict = {"right": True}
     pending: dict | None = None
     pending_lock = threading.Lock()
@@ -347,6 +355,7 @@ def run() -> None:
                         gained = {k: inv_after.get(k, 0) - inv_before.get(k, 0)
                                   for k in inv_after if inv_after.get(k, 0) > inv_before.get(k, 0)}
                         print(f"[tree] 砍完第{_trees_chopped[0]}棵 gained={gained}")
+                        organize_hotbar(state.inventory_slots)
                         deadline = 0.0
                 goal_exec.start("chop_tree", {"type": "tree"}, timeout=30, on_done=_on_tree_done)
                 current_ctrl = {}
