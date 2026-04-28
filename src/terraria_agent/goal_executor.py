@@ -119,7 +119,7 @@ class GoalExecutor:
             pcx = p.pos[0] + p.width / 2.0
             pcy = p.pos[1] + p.height / 2.0
             tcx = obj.pos[0] + _TILE
-            tcy = obj.pos[1] + _TILE
+            tcy = obj.pos[1] + obj.height * _TILE
             mx = (tcx - pcx) / _TILE
             my = (tcy - pcy) / _TILE
             ctrl = {"use_item": True, "sc": 1, "mx": mx, "my": my}
