@@ -85,7 +85,7 @@ class Tactician:
                 ],
             )
             latency = _time.monotonic() - t0
-            raw = msg.choices[0].message.content.strip()
+            raw = (msg.choices[0].message.content or "").strip()
             usage = msg.usage
             print(f"[tactician] {latency:.1f}s | prompt={usage.prompt_tokens} completion={usage.completion_tokens} | {raw!r}")
             m = _JSON_RE.search(raw)

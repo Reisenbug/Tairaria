@@ -246,13 +246,18 @@ def run() -> None:
         nonlocal pending
         goal = tactician.goal
         goal_line = f"[目标:{goal}]\n" if goal else ""
-        full_text = f"{goal_line}[触发:{trigger_reason}]\n{state_text}"
+        ctx_lines = "\n".join(_pending_context)
+        _pending_context.clear()
+        ctx_part = f"[事件]\n{ctx_lines}\n" if ctx_lines else ""
+        full_text = f"{goal_line}{ctx_part}[触发:{trigger_reason}]\n{state_text}"
         decision = llm.decide(full_text)
         with pending_lock:
             pending = decision if decision else {}
 
     llm_thread: threading.Thread | None = None
     deadline: float = time.time() + _DEFAULT_DEADLINE
+    _pending_context: list[str] = []
+    FightCoordinator_active = [False]
     _prev_tool_weapon_slots: set[int] = set()
 
     while True:
@@ -346,6 +351,15 @@ def run() -> None:
                 )
                 llm_thread.start()
 
+        if state.enemies:
+            if not FightCoordinator_active[0]:
+                controller.fight_start()
+                FightCoordinator_active[0] = True
+        else:
+            if FightCoordinator_active[0]:
+                controller.fight_stop()
+                FightCoordinator_active[0] = False
+
         if _fight_deadline > 0 and now >= _fight_deadline:
             controller.fight_stop()
             _fight_deadline = 0.0
@@ -363,6 +377,8 @@ def run() -> None:
                         gained = {k: inv_after.get(k, 0) - inv_before.get(k, 0)
                                   for k in inv_after if inv_after.get(k, 0) > inv_before.get(k, 0)}
                         print(f"[tree] 砍完第{_trees_chopped[0]}棵 gained={gained}")
+                        if gained:
+                            _pending_context.append(f"砍树完成，获得:{gained}")
                         organize_hotbar(state.inventory_slots)
                         current_ctrl = saved_ctrl
                         deadline = 0.0
