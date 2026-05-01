@@ -47,6 +47,7 @@ timeout 建议：open_chest 15，chop_tree 30。
 - fight_moving_right/left：边移动边攻击
 - loot：拾取附近掉落物
 - heal：使用治疗药水
+- craft：制作物品。需额外字段 item_id（从可制作列表取）和 amount（数量）
 
 ## Terraria 游戏规则
 
@@ -62,6 +63,7 @@ timeout 建议：open_chest 15，chop_tree 30。
 {{"思考": "发现高树在左方8格，砍树获取木材", "goal": "chop_tree", "target": {{"type": "tree", "rel_x": -8, "rel_y": 0}}, "timeout": 30}}
 {{"思考": "地形平坦，向右探索", "skill": "explore_right", "持续秒数": 20.0}}
 {{"思考": "有敌人，攻击", "skill": "fight_nearest", "持续秒数": 5.0}}
+{{"思考": "有木材可制作木平台", "skill": "craft", "item_id": 94, "amount": 20}}
 """
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)

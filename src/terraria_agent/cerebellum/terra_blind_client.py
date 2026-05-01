@@ -9,9 +9,9 @@ from typing import Optional
 from terraria_agent.cerebellum.damage_detector import DamageDetector
 from terraria_agent.geometry import player_center_world, world_distance_tiles
 from terraria_agent.models.game_state import (
-    Camera, DroppedItem, Enemy, EnemyThreat, GameState, InventorySlot,
-    MovementInfo, Player, TerrainScan, TerrainType, TileRun, TileWindow,
-    TownNpc, WorldObject,
+    Camera, CraftableRecipe, DroppedItem, Enemy, EnemyThreat, GameState,
+    InventorySlot, MovementInfo, Player, TerrainScan, TerrainType, TileRun,
+    TileWindow, TownNpc, WorldObject,
 )
 
 
@@ -413,6 +413,21 @@ class TerraBlindClient:
             terrain_scan = _scan_terrain(tile_window, player, movement)
             terrain_ahead = terrain_scan.terrain_type
 
+        available_recipes: list[CraftableRecipe] = []
+        for r in payload.get("available_recipes") or []:
+            if not isinstance(r, dict):
+                continue
+            ingredients = [(ing.get("name", ""), int(ing.get("count", 1)))
+                           for ing in (r.get("ingredients") or []) if isinstance(ing, dict)]
+            available_recipes.append(CraftableRecipe(
+                item_id=int(r.get("item_id", 0)),
+                item_name=str(r.get("item_name", "")),
+                result_stack=int(r.get("result_stack", 1)),
+                ingredients=ingredients,
+            ))
+
+        nearby_stations = [str(s) for s in (payload.get("nearby_stations") or [])]
+
         return GameState(
             player=player,
             camera=camera,
@@ -431,6 +446,8 @@ class TerraBlindClient:
             chest_open=bool(eq.get("chest_open", False)),
             smart_cursor=bool(eq.get("smart_cursor", False)),
             biome=str(p.get("biome", "forest")),
+            available_recipes=available_recipes,
+            nearby_stations=nearby_stations,
         )
 
     def _empty_state(self) -> GameState:

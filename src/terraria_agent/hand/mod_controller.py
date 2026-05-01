@@ -75,6 +75,22 @@ class ModController:
 
         self._post_control(ctrl)
 
+    def craft(self, item_name: str = "", item_id: int = -1, amount: int = 1) -> dict:
+        payload: dict = {"amount": amount}
+        if item_id >= 0:
+            payload["item_id"] = item_id
+        else:
+            payload["item_name"] = item_name
+        import json, urllib.request
+        try:
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request("http://127.0.0.1:17878/craft", data=data, method="POST")
+            req.add_header("Content-Type", "application/json")
+            with _OPENER.open(req, timeout=2.0) as resp:
+                return json.loads(resp.read())
+        except Exception as e:
+            return {"error": str(e)}
+
     def fight_start(self, max_dist: float = 20.0) -> None:
         self._http_post_json(_FIGHT_URL, {"active": True, "max_dist": max_dist})
 

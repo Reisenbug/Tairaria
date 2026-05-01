@@ -219,6 +219,13 @@ class WorldObject(BaseModel):
     height: int = 0
 
 
+class CraftableRecipe(BaseModel):
+    item_id: int
+    item_name: str
+    result_stack: int = 1
+    ingredients: list[tuple[str, int]] = []
+
+
 class GameState(BaseModel):
     player: Player
     camera: Camera = Camera()
@@ -241,3 +248,5 @@ class GameState(BaseModel):
     is_dark: bool = False
     time_of_day: str = "day"
     biome: str = "forest"
+    available_recipes: list[CraftableRecipe] = []
+    nearby_stations: list[str] = []

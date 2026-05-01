@@ -59,6 +59,16 @@ def serialize(state: GameState) -> str:
     if inv_summary:
         lines.append(f"inventory={inv_summary}")
 
+    if state.nearby_stations:
+        lines.append(f"nearby_stations={state.nearby_stations}")
+
+    if state.available_recipes:
+        parts = []
+        for r in state.available_recipes:
+            ings = "+".join(f"{n}x{c}" for n, c in r.ingredients)
+            parts.append(f"{r.item_name}(id={r.item_id},x{r.result_stack},需要:{ings})")
+        lines.append(f"可制作=[{', '.join(parts)}]")
+
     return "\n".join(lines)
 
 

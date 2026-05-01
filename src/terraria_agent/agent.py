@@ -310,7 +310,14 @@ def run() -> None:
                 elif goal_name:
                     print(f"[决策] {thought} → goal:{goal_name} 已有 goal 进行中，跳过")
                 _FIGHT_SKILLS = {"fight_nearest", "fight_moving_right", "fight_moving_left"}
-                if skill_name in _FIGHT_SKILLS:
+                if skill_name == "craft":
+                    item_id = decision.get("item_id", -1)
+                    amount = int(decision.get("amount", 1))
+                    result = controller.craft(item_id=item_id, amount=amount)
+                    print(f"[决策] {thought} → craft item_id={item_id} amount={amount} result={result}")
+                    ctrl = {}
+                    duration = 1.0
+                elif skill_name in _FIGHT_SKILLS:
                     controller.fight_start()
                     _fight_deadline = now + duration
                     ctrl = {}
