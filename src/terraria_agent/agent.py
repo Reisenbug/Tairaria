@@ -400,7 +400,7 @@ def run() -> None:
                 current_ctrl = {}
 
         cave = cave_detect(state)
-        if cave and not _cave_bypass_active[0]:
+        if cave and not _cave_bypass_active[0] and not goal_exec.active:
             _, cave_dir, walk_back, rise_tiles = cave
             print(f"[cave bypass] dir={cave_dir}")
             current_ctrl = {}
