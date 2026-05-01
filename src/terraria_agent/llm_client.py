@@ -57,6 +57,14 @@ timeout 建议：open_chest 15，chop_tree 30。
 - 熔岩(lava)附近立刻 retreat
 - trees_chopped=N/2：已自动砍了N棵高树，达到2棵后不要再主动砍树
 
+## Terraria 世界地理与导航
+
+- 丛林在世界一侧，雪地在另一侧，出生点在中央
+- detected_tiles 含 hardened_sand 或 sandstone → 当前方向有丛林，继续走
+- biome=snow 或 corruption 或 crimson → 丛林在另一侧，换方向
+- biome=jungle → 已到达丛林，继续探索即可
+- 确定方向后坚持，不要频繁换向
+
 ## 示例
 
 {{"思考": "发现箱子在右方12格，走过去开箱", "goal": "open_chest", "target": {{"type": "chest", "rel_x": 12, "rel_y": 0}}, "timeout": 15}}
