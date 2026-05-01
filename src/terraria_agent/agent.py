@@ -394,11 +394,14 @@ def run() -> None:
             print(f"[cave bypass] dir={cave_dir}")
             current_ctrl = {}
             deadline = now + 999
-            threading.Thread(
-                target=_cave_bypass_worker,
-                args=(controller, cave_dir),
-                daemon=True,
-            ).start()
+            def _cave_done_cb(cave_dir=cave_dir):
+                nonlocal deadline, current_ctrl
+                current_ctrl = {"right": True}
+                deadline = 0.0
+            def _cave_thread(cave_dir=cave_dir):
+                _cave_bypass_worker(controller, cave_dir)
+                _cave_done_cb()
+            threading.Thread(target=_cave_thread, daemon=True).start()
 
         reflex_ctrl = reflex_check(state)
         if reflex_ctrl:
