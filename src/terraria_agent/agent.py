@@ -353,7 +353,7 @@ def run() -> None:
                 trigger_reason = trigger.check(state, current_ctrl, now)
 
             if trigger_reason:
-                state_text = serialize(state)
+                state_text = serialize(state, focus=trigger_reason)
                 state_text += f"\ntrees_chopped={_trees_chopped[0]}/{_TREE_CHOP_LIMIT}"
                 print(f"[触发:{trigger_reason}]")
                 llm_thread = threading.Thread(
