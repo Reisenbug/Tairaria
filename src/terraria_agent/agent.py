@@ -390,6 +390,9 @@ def run() -> None:
                         if gained:
                             _pending_context.append(f"砍树完成，获得:{gained}")
                         organize_hotbar(state.inventory_slots)
+                        if _trees_chopped[0] >= _TREE_CHOP_LIMIT:
+                            result = controller.craft(item_id=94, amount=50)
+                            print(f"[tree] 自动制作木平台: {result}")
                         current_ctrl = saved_ctrl
                         deadline = 0.0
                 goal_exec.start("chop_tree", {"type": "tree"}, timeout=30, on_done=_on_tree_done)
