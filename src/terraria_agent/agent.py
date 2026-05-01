@@ -296,7 +296,7 @@ def run() -> None:
                 duration = float(decision.get("持续秒数", _DEFAULT_DEADLINE))
                 goal_name = decision.get("goal")
                 skill_name = decision.get("skill") if not goal_name else None
-                if goal_name:
+                if goal_name and not goal_exec.active:
                     target = decision.get("target", {})
                     timeout = float(decision.get("timeout", 15.0))
                     def _on_goal_done(result: str) -> None:
@@ -307,6 +307,8 @@ def run() -> None:
                     current_ctrl = {}
                     deadline = now + timeout + 2.0
                     print(f"[决策] {thought} → goal:{goal_name} target={target}")
+                elif goal_name:
+                    print(f"[决策] {thought} → goal:{goal_name} 已有 goal 进行中，跳过")
                 _FIGHT_SKILLS = {"fight_nearest", "fight_moving_right", "fight_moving_left"}
                 if skill_name in _FIGHT_SKILLS:
                     controller.fight_start()
@@ -328,7 +330,7 @@ def run() -> None:
                     else:
                         print(f"[决策] {thought} → {skill_name} 未找到")
                         ctrl = {}
-                else:
+                elif not goal_name:
                     ctrl = decision.get("控制", {})
                     print(f"[决策] {thought} → inline ({duration}s)")
                 if ctrl:
@@ -345,6 +347,7 @@ def run() -> None:
 
             if trigger_reason:
                 state_text = serialize(state)
+                state_text += f"\ntrees_chopped={_trees_chopped[0]}/{_TREE_CHOP_LIMIT}"
                 print(f"[触发:{trigger_reason}]")
                 llm_thread = threading.Thread(
                     target=llm_worker, args=(state_text, trigger_reason), daemon=True
