@@ -259,6 +259,7 @@ def run() -> None:
     _pending_context: list[str] = []
     FightCoordinator_active = [False]
     _prev_tool_weapon_slots: set[int] = set()
+    _cave_bypass_active = [False]
 
     while True:
         now = time.time()
@@ -399,15 +400,17 @@ def run() -> None:
                 current_ctrl = {}
 
         cave = cave_detect(state)
-        if cave:
+        if cave and not _cave_bypass_active[0]:
             _, cave_dir, walk_back, rise_tiles = cave
             print(f"[cave bypass] dir={cave_dir}")
             current_ctrl = {}
             deadline = now + 999
+            _cave_bypass_active[0] = True
             def _cave_done_cb(cave_dir=cave_dir):
                 nonlocal deadline, current_ctrl
                 current_ctrl = {"right": True}
                 deadline = 0.0
+                _cave_bypass_active[0] = False
             def _cave_thread(cave_dir=cave_dir):
                 _cave_bypass_worker(controller, cave_dir)
                 _cave_done_cb()
