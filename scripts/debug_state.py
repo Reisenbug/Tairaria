@@ -19,9 +19,16 @@ buffs = d.get("buffs", [])
 if buffs:
     print(f"buffs={[b['name'] for b in buffs]}")
 
+objects = d.get("objects", [])
+if objects:
+    for o in objects[:10]:
+        h = f" height={o['height']}" if o.get('height') else ""
+        print(f"  {o['name']} tile=({o['tx']},{o['ty']}){h}")
+
 tiles = d.get("tiles", {})
 if tiles:
-    ox, oy = tiles["origin_x"], tiles["origin_y"]
+    origin = tiles.get("origin", {})
+    ox, oy = origin.get("x", 0), origin.get("y", 0)
     pcx = int((p['pos']['x'] + p.get('width', 20) / 2) / 16)
     pcy = int((p['pos']['y'] + p.get('height', 42)) / 16)
     print(f"player_tile=({pcx}, {pcy})")
@@ -31,17 +38,17 @@ if tiles:
         row = tiles["rows"][ry]
         col = 0
         for run in row:
-            end = col + run["count"]
+            end = col + run[2]
             if col <= rx < end:
-                print(f"tile_at_feet: type={run['type']} sflags={run['sflags']}")
+                print(f"tile_at_feet: type={run[0]} sflags={run[1]}")
                 break
             col = end
     if 0 <= ry - 3 < len(tiles["rows"]):
         row = tiles["rows"][ry - 3]
         col = 0
         for run in row:
-            end = col + run["count"]
+            end = col + run[2]
             if col <= rx < end:
-                print(f"tile_above_head: type={run['type']} sflags={run['sflags']}")
+                print(f"tile_above_head: type={run[0]} sflags={run[1]}")
                 break
             col = end

@@ -5,16 +5,16 @@
       "use_item": true,
       "sc": 0,
       "slot": 9,
-      "mx": -0.2,
-      "my": -4.1
+      "mx": 3.9,
+      "my": -3.2
     },
     {
       "use_item": true,
       "use_tile": true,
       "sc": 0,
       "slot": 9,
-      "mx": -0.2,
-      "my": -4.1
+      "mx": 3.9,
+      "my": -3.2
     },
     {
       "jump": true,
@@ -22,8 +22,8 @@
       "use_tile": true,
       "sc": 0,
       "slot": 9,
-      "mx": -0.2,
-      "my": -4.1
+      "mx": 3.9,
+      "my": -3.2
     },
     {
       "jump": true,
@@ -31,24 +31,9 @@
       "use_tile": true,
       "sc": 0,
       "slot": 9,
-      "mx": -0.1,
-      "my": -4.1
-    },
-    {
-      "jump": true,
-      "use_item": true,
-      "use_tile": true,
-      "sc": 0,
-      "slot": 9,
-      "mx": -0.2,
-      "my": -4.2
-    },
-    {
-      "jump": true,
-      "sc": 0,
-      "slot": 9,
-      "mx": -0.2,
-      "my": -4.1
+      "mx": 3.9,
+      "my": -3.3,
+      "repeat": 3
     }
   ]
 }

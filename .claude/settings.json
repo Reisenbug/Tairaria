@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(du:*)",
+      "Bash(ruff *)"
+    ]
+  }
+}

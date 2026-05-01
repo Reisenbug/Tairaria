@@ -87,7 +87,7 @@ def main() -> None:
         from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient
         detector = TerraBlindClient()
 
-    orch = AgentOrchestrator(bridge, tick_rate=5.0, detector=detector)
+    orch = AgentOrchestrator(bridge, tick_rate=20.0, detector=detector)
     orch._task_queue = TaskQueue(
         goal="go jungle, collect loot",
         stop_biome="jungle",
