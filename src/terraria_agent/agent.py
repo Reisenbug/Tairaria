@@ -303,6 +303,7 @@ def run() -> None:
                     def _on_goal_done(result: str) -> None:
                         print(f"[goal] 完成: {result}")
                         nonlocal deadline
+                        organize_hotbar(state.inventory_slots)
                         deadline = 0.0
                     goal_exec.start(goal_name, target, timeout, _on_goal_done)
                     current_ctrl = {}
@@ -394,6 +395,7 @@ def run() -> None:
                         if _trees_chopped[0] >= _TREE_CHOP_LIMIT:
                             result = controller.craft(item_id=94, amount=50)
                             print(f"[tree] 自动制作木平台: {result}")
+                            organize_hotbar(state.inventory_slots)
                         current_ctrl = saved_ctrl
                         deadline = 0.0
                 goal_exec.start("chop_tree", {"type": "tree"}, timeout=30, on_done=_on_tree_done)
