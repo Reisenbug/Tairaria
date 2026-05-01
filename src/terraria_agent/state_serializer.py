@@ -23,6 +23,7 @@ def serialize(state: GameState, focus: str = "deadline") -> str:
     hotbar_items = [f"{i}:{name}" for i, name in enumerate(state.hotbar) if name]
     lines.append(f"hotbar=[{', '.join(hotbar_items)}] selected={p.selected_slot}")
 
+    want_tiles   = focus in ("deadline", "生物群系切换")
     want_terrain = focus in ("deadline", "卡住", "地形突变_pit")
     want_enemies = focus in ("deadline", "血量骤降")
     want_drops   = focus in ("deadline",)
@@ -62,6 +63,10 @@ def serialize(state: GameState, focus: str = "deadline") -> str:
             dx, dy = _rel(o.pos, pcx, pcy)
             parts.append(f"{o.type}(rel={dx:+d},{dy:+d})")
         lines.append(f"objects=[{', '.join(parts)}]")
+
+    if want_tiles and state.detected_tiles:
+        parts = [f"{t.name}(rel={t.rel_x:+d},{t.rel_y:+d})" for t in state.detected_tiles]
+        lines.append(f"detected_tiles=[{', '.join(parts)}]")
 
     if want_inv:
         inv_summary = {k: v for k, v in state.inventory.items() if v > 0}

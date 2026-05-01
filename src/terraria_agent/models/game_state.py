@@ -219,6 +219,13 @@ class WorldObject(BaseModel):
     height: int = 0
 
 
+class DetectedTile(BaseModel):
+    name: str
+    tile_pos: tuple[int, int] = (0, 0)
+    rel_x: int = 0
+    rel_y: int = 0
+
+
 class CraftableRecipe(BaseModel):
     item_id: int
     item_name: str
@@ -250,3 +257,4 @@ class GameState(BaseModel):
     biome: str = "forest"
     available_recipes: list[CraftableRecipe] = []
     nearby_stations: list[str] = []
+    detected_tiles: list[DetectedTile] = []

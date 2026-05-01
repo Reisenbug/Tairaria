@@ -9,9 +9,9 @@ from typing import Optional
 from terraria_agent.cerebellum.damage_detector import DamageDetector
 from terraria_agent.geometry import player_center_world, world_distance_tiles
 from terraria_agent.models.game_state import (
-    Camera, CraftableRecipe, DroppedItem, Enemy, EnemyThreat, GameState,
-    InventorySlot, MovementInfo, Player, TerrainScan, TerrainType, TileRun,
-    TileWindow, TownNpc, WorldObject,
+    Camera, CraftableRecipe, DetectedTile, DroppedItem, Enemy, EnemyThreat,
+    GameState, InventorySlot, MovementInfo, Player, TerrainScan, TerrainType,
+    TileRun, TileWindow, TownNpc, WorldObject,
 )
 
 
@@ -428,6 +428,17 @@ class TerraBlindClient:
 
         nearby_stations = [str(s) for s in (payload.get("nearby_stations") or [])]
 
+        detected_tiles: list[DetectedTile] = []
+        for dt in payload.get("detected_tiles") or []:
+            if not isinstance(dt, dict):
+                continue
+            detected_tiles.append(DetectedTile(
+                name=str(dt.get("name", "")),
+                tile_pos=(int(dt.get("tx", 0)), int(dt.get("ty", 0))),
+                rel_x=int(dt.get("rel_x", 0)),
+                rel_y=int(dt.get("rel_y", 0)),
+            ))
+
         return GameState(
             player=player,
             camera=camera,
@@ -448,6 +459,7 @@ class TerraBlindClient:
             biome=str(p.get("biome", "forest")),
             available_recipes=available_recipes,
             nearby_stations=nearby_stations,
+            detected_tiles=detected_tiles,
         )
 
     def _empty_state(self) -> GameState:
