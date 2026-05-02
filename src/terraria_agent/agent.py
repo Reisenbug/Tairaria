@@ -299,8 +299,8 @@ def _handle_stuck(state, controller=None, perception=None, stuck_flag=None) -> b
     if shallow and controller is not None and perception is not None:
         print(f"[卡住] 头顶有方块，向上挖掘...")
         dig_frames = (
-            [{"use_item": True, "sc": 1, "selected_slot": 2, "mx": 0, "my": -5, "jump": True}] * 15 +
-            [{"use_item": True, "sc": 1, "selected_slot": 2, "mx": 0, "my": -5}] * 15
+            [{"use_item": True, "sc": 1, "selected_slot": 1, "mx": 0, "my": -5, "jump": True}] * 15 +
+            [{"use_item": True, "sc": 1, "selected_slot": 1, "mx": 0, "my": -5}] * 15
         )
         import threading as _threading
         if stuck_flag is not None:
