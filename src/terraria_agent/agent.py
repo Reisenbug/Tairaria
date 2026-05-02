@@ -22,7 +22,7 @@ from terraria_agent.hand.hotbar_organizer import organize_hotbar
 
 _EXEC_TICK = 0.2
 _TILE = 16.0
-_STUCK_SECONDS = 5.0
+_STUCK_SECONDS = 1.0
 _STUCK_SPEED_THRESHOLD = 0.5
 _HP_DROP_THRESHOLD = 0.4
 _TACTICIAN_INTERVAL = 60.0
@@ -225,6 +225,19 @@ def _cave_bypass_worker(controller, cave_dir: str) -> None:
     print(f"[cave bypass] replay {len(frames)} 帧")
     controller.replay_skill(frames)
 
+def _overhead_clearance(state) -> int:
+    tw = state.tile_window
+    if tw is None:
+        return 99
+    p = state.player
+    head_y = int(p.pos[1] / 16.0)
+    for dy in range(1, 16):
+        t = tw.tile_at(int((p.pos[0] + p.width / 2.0) / 16.0), head_y - dy)
+        if t is not None and t.solid:
+            return dy - 1
+    return 99
+
+
 def _safety_interrupt(state, controller, fight_active) -> str | None:
     p = state.player
     if p.hp >= p.max_hp * 0.3:
@@ -404,11 +417,32 @@ def run() -> None:
                         cx = pcx + sign * i
                         sy = _surface_y(tw, cx, feet_y - 1) if tw else None
                         surf.append(sy - feet_y if sy is not None else "?")
-                    print(f"[卡住诊断] pos=({pcx},{feet_y}) dir={p.direction} vel={p.velocity}")
+                    clearance = _overhead_clearance(state)
+                    print(f"[卡住诊断] pos=({pcx},{feet_y}) dir={p.direction} clearance={clearance}")
                     print(f"[卡住诊断] 前方地表相对高度: {surf}")
                     if state.terrain_scan:
                         ts = state.terrain_scan
                         print(f"[卡住诊断] terrain={ts.terrain_type.value} dist={ts.distance_tiles} size={ts.depth_or_height}")
+                    if clearance < 3:
+                        pickaxe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
+                        if pickaxe_slot is not None:
+                            print(f"[卡住] 头顶空隙{clearance}格，向上挖掘...")
+                            def _dig_up_worker():
+                                for _ in range(30):
+                                    controller._post_control({"use_item": True, "sc": 1,
+                                                              "selected_slot": pickaxe_slot,
+                                                              "mx": 0, "my": -5})
+                                    time.sleep(0.2)
+                                    s = perception.detect(frame=None)
+                                    if s and _overhead_clearance(s) >= 3:
+                                        break
+                                dir_name = state.player.direction
+                                frames = _load_skill_frames(f"big_pillar_jump_{dir_name}")
+                                if frames:
+                                    print(f"[卡住] 挖穿，触发 big_pillar_jump_{dir_name}")
+                                    controller.replay_skill(frames)
+                            threading.Thread(target=_dig_up_worker, daemon=True).start()
+                            continue
                 llm_thread = threading.Thread(
                     target=llm_worker, args=(state_text, trigger_reason), daemon=True
                 )
