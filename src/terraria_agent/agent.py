@@ -425,6 +425,32 @@ def run() -> None:
                     if state.terrain_scan:
                         ts = state.terrain_scan
                         print(f"[卡住诊断] terrain={ts.terrain_type.value} dist={ts.distance_tiles} size={ts.depth_or_height}")
+                    if tw:
+                        rows = []
+                        for dy in range(-15, 1):
+                            row = ""
+                            for dx in range(-20, 21):
+                                cx, cy = pcx + dx, feet_y + dy
+                                if abs(dx) <= 1 and dy >= -3 and dy <= 0:
+                                    row += "@"
+                                    continue
+                                t = tw.tile_at(cx, cy)
+                                if t is None:
+                                    row += "?"
+                                elif t.lava:
+                                    row += "L"
+                                elif t.water:
+                                    row += "~"
+                                elif t.platform:
+                                    row += "="
+                                elif t.solid:
+                                    row += "#"
+                                else:
+                                    row += "."
+                            rows.append(row)
+                        print("[卡住地图] (顶=头顶15格, 底=脚底, @=玩家, #=solid, ==platform, ~=水, L=岩浆)")
+                        for row in rows:
+                            print(" " + row)
                     if not overhead_clear:
                         pickaxe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
                         if pickaxe_slot is not None:
