@@ -1,0 +1,22 @@
+{
+  "smart_cursor": false,
+  "frames": [
+    {
+      "use_item": true,
+      "sc": 0,
+      "slot": 2,
+      "mx": 0.4,
+      "my": 2.2,
+      "repeat": 6
+    },
+    {
+      "jump": true,
+      "use_item": true,
+      "sc": 0,
+      "slot": 2,
+      "mx": 0.4,
+      "my": 2.2,
+      "repeat": 25
+    }
+  ]
+}

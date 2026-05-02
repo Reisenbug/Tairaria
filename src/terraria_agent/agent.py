@@ -61,14 +61,14 @@ class TriggerDetector:
         has_horizontal = current_ctrl.get("left") or current_ctrl.get("right")
         if has_horizontal:
             self._pos_history.append((now, p.pos[0]))
-            self._pos_history = [(t, x) for t, x in self._pos_history if now - t <= _STUCK_WINDOW]
             if len(self._pos_history) >= 2:
-                oldest_x = self._pos_history[0][1]
+                oldest_t, oldest_x = self._pos_history[0]
+                elapsed = now - oldest_t
                 net = abs(p.pos[0] - oldest_x) / _TILE
-                elapsed = now - self._pos_history[0][0]
                 if elapsed >= _STUCK_WINDOW and net < _STUCK_NET_TILES:
                     self._pos_history.clear()
                     return "卡住"
+            self._pos_history = [(t, x) for t, x in self._pos_history if now - t <= _STUCK_WINDOW]
         else:
             self._pos_history.clear()
         if self._prev_hp >= 0:
@@ -276,7 +276,7 @@ def _handle_stuck(state, controller=None, pickaxe_slot=None, perception=None, st
             row = ""
             for dx in range(-20, 21):
                 cx, cy = pcx + dx, feet_y + dy
-                if abs(dx) <= 1 and dy >= -3 and dy <= 0:
+                if dx in (0, 1) and dy >= -3 and dy <= 0:
                     row += "@"
                     continue
                 t = tw.tile_at(cx, cy)
