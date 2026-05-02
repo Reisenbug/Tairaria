@@ -340,7 +340,7 @@ def run() -> None:
     tactician = Tactician()
     trigger = TriggerDetector()
     _stuck_handling = [False]
-    goal_exec = GoalExecutor(controller, stuck_flag=_stuck_handling)
+    goal_exec = GoalExecutor(controller)
     print("[agent] 启动 — ctrl+c 停止")
 
     first_state = None
@@ -358,8 +358,40 @@ def run() -> None:
     _prev_overhead: bool = False
     _fight_deadline: float = 0.0
     _trees_chopped = [0]
-    _TREE_HEIGHT_MIN = 15
     _TREE_CHOP_LIMIT = 2
+    _last_goal: list = [None]
+    _inv_before: list = [{}]
+
+    def _on_goal_done(result: str) -> None:
+        nonlocal deadline
+        print(f"[goal] 完成: {result}")
+        if "done" in result and _last_goal[0] == "chop_tree":
+            fresh = perception.detect(frame=None)
+            gained = {k: fresh.inventory.get(k, 0) - _inv_before[0].get(k, 0)
+                      for k in fresh.inventory if fresh.inventory.get(k, 0) > _inv_before[0].get(k, 0)}
+            print(f"[tree] 砍完第{_trees_chopped[0]}棵 gained={gained}")
+            if gained:
+                _pending_context.append(f"砍树完成，获得:{gained}")
+            organize_hotbar(fresh.inventory_slots)
+            if _trees_chopped[0] >= _TREE_CHOP_LIMIT:
+                r = controller.craft(item_id=94, amount=50)
+                print(f"[tree] 自动制作木平台: {r}")
+                organize_hotbar(fresh.inventory_slots)
+        if "stuck" in result:
+            fresh = perception.detect(frame=None)
+            ps = next((s.slot_index for s in fresh.inventory_slots[:10] if s.is_pickaxe), None)
+            _handle_stuck(fresh, controller, ps, perception, _stuck_handling)
+        deadline = 0.0
+
+    def _start_goal(goal_name: str, target: dict, timeout: float) -> None:
+        nonlocal deadline, current_ctrl
+        _last_goal[0] = goal_name
+        _inv_before[0] = dict(state.inventory)
+        if goal_name == "chop_tree":
+            _trees_chopped[0] += 1
+        goal_exec.start(goal_name, target, timeout, _on_goal_done)
+        current_ctrl = {}
+        deadline = now + timeout + 2.0
 
     def llm_worker(state_text: str, trigger_reason: str) -> None:
         nonlocal pending
@@ -426,18 +458,7 @@ def run() -> None:
                 if goal_name and not goal_exec.active:
                     target = decision.get("target", {})
                     timeout = float(decision.get("timeout", 15.0))
-                    def _on_goal_done(result: str) -> None:
-                        print(f"[goal] 完成: {result}")
-                        nonlocal deadline
-                        organize_hotbar(state.inventory_slots)
-                        if "stuck" in result:
-                            fresh = perception.detect(frame=None)
-                            ps = next((s.slot_index for s in fresh.inventory_slots[:10] if s.is_pickaxe), None)
-                            _handle_stuck(fresh, controller, ps, perception, _stuck_handling)
-                        deadline = 0.0
-                    goal_exec.start(goal_name, target, timeout, _on_goal_done)
-                    current_ctrl = {}
-                    deadline = now + timeout + 2.0
+                    _start_goal(goal_name, target, timeout)
                     print(f"[决策] {thought} → goal:{goal_name} target={target}")
                 elif goal_name:
                     print(f"[决策] {thought} → goal:{goal_name} 已有 goal 进行中，跳过")
@@ -510,30 +531,6 @@ def run() -> None:
             controller.fight_stop()
             _fight_deadline = 0.0
 
-        if not goal_exec.active and _trees_chopped[0] < _TREE_CHOP_LIMIT:
-            big_trees = [o for o in state.objects if o.type == "tree" and o.height >= _TREE_HEIGHT_MIN]
-            if big_trees:
-                _trees_chopped[0] += 1
-                inv_before = dict(state.inventory)
-                saved_ctrl = dict(current_ctrl)
-                def _on_tree_done(result: str) -> None:
-                    nonlocal deadline, current_ctrl
-                    if "done" in result:
-                        inv_after = state.inventory
-                        gained = {k: inv_after.get(k, 0) - inv_before.get(k, 0)
-                                  for k in inv_after if inv_after.get(k, 0) > inv_before.get(k, 0)}
-                        print(f"[tree] 砍完第{_trees_chopped[0]}棵 gained={gained}")
-                        if gained:
-                            _pending_context.append(f"砍树完成，获得:{gained}")
-                        organize_hotbar(state.inventory_slots)
-                        if _trees_chopped[0] >= _TREE_CHOP_LIMIT:
-                            result = controller.craft(item_id=94, amount=50)
-                            print(f"[tree] 自动制作木平台: {result}")
-                            organize_hotbar(state.inventory_slots)
-                        current_ctrl = saved_ctrl
-                        deadline = 0.0
-                goal_exec.start("chop_tree", {"type": "tree"}, timeout=30, on_done=_on_tree_done)
-                current_ctrl = {}
 
         cave = cave_detect(state)
         if cave and not _cave_bypass_active[0] and not goal_exec.active:
@@ -552,9 +549,11 @@ def run() -> None:
                 _cave_done_cb()
             threading.Thread(target=_cave_thread, daemon=True).start()
 
-        reflex_ctrl = reflex_check(state)
-        if reflex_ctrl:
-            actions = _parse_actions(reflex_ctrl, state)
+        reflex_out = reflex_check(state, _trees_chopped[0], _TREE_CHOP_LIMIT)
+        if reflex_out and "goal" in reflex_out and not goal_exec.active:
+            _start_goal(reflex_out["goal"], reflex_out.get("target", {}), reflex_out.get("timeout", 15.0))
+        if reflex_out and "ctrl" in reflex_out:
+            actions = _parse_actions(reflex_out["ctrl"], state)
         elif goal_exec.active:
             goal_ctrl = goal_exec.tick(state)
             if goal_ctrl:
