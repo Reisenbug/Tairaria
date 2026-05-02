@@ -209,10 +209,15 @@ def _cave_bypass_worker(controller, cave_dir: str) -> None:
     print(f"[cave bypass] replay {len(frames)} 帧")
     controller.replay_skill(frames)
 
-def _safety_interrupt(state) -> str | None:
-    if state.player.hp < state.player.max_hp * 0.3:
-        return "血量低"
-    return None
+def _safety_interrupt(state, controller, fight_active) -> str | None:
+    p = state.player
+    if p.hp >= p.max_hp * 0.3:
+        return None
+    controller._http_fire("http://127.0.0.1:17878/quick_heal")
+    if fight_active[0]:
+        controller.fight_stop()
+        fight_active[0] = False
+    return "血量低"
 
 
 def run() -> None:
@@ -290,11 +295,17 @@ def run() -> None:
             organize_hotbar(state.inventory_slots)
         _prev_tool_weapon_slots = cur_tool_weapon
 
-        reason = _safety_interrupt(state)
+        reason = _safety_interrupt(state, controller, FightCoordinator_active)
         if reason:
             print(f"[agent] 安全中断: {reason}")
-            current_ctrl = {"left": True}
-            deadline = now + 3.0
+            if state.enemies:
+                nearest = min(state.enemies, key=lambda e: e.distance)
+                p = state.player
+                retreat_dir = "left" if nearest.pos[0] > p.pos[0] else "right"
+            else:
+                retreat_dir = "left" if state.player.direction == "right" else "right"
+            current_ctrl = {retreat_dir: True}
+            deadline = now + 5.0
 
         with pending_lock:
             if pending is not None:
