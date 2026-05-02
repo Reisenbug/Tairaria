@@ -13,6 +13,7 @@ _ARRIVE_DIST = 3.0
 
 _NAV_STUCK_SECONDS = 2.0
 _NAV_STUCK_MIN_PROGRESS = 0.5
+_NAV_MAX_DIST = 60.0
 
 
 class GoalExecutor:
@@ -92,6 +93,9 @@ class GoalExecutor:
             self._target_abs_x = obj.pos[0]
 
         dist = self._dist_to(obj, state)
+        if self._target_abs_x is None and dist > _NAV_MAX_DIST:
+            self._finish("too_far")
+            return {}
         if dist <= _ARRIVE_DIST:
             self._phase = "opening"
             return self._aim_and_interact(obj, state)
@@ -119,6 +123,9 @@ class GoalExecutor:
             self._target_abs_x = obj.pos[0]
 
         dist = self._dist_to(obj, state)
+        if self._target_abs_x is None and dist > _NAV_MAX_DIST:
+            self._finish("too_far")
+            return {}
         if dist <= _ARRIVE_DIST:
             self._phase = "chopping"
             axe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_axe), None)

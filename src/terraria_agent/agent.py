@@ -251,7 +251,7 @@ def _overhead_shallow(state) -> bool:
     return False
 
 
-def _handle_stuck(state, controller=None, pickaxe_slot=None, perception=None) -> bool:
+def _handle_stuck(state, controller=None, pickaxe_slot=None, perception=None, stuck_flag=None) -> bool:
     from terraria_agent.pit_detector import _surface_y
     p = state.player
     tw = state.tile_window
@@ -303,19 +303,25 @@ def _handle_stuck(state, controller=None, pickaxe_slot=None, perception=None) ->
             [{"use_item": True, "sc": 1, "selected_slot": pickaxe_slot, "mx": 0, "my": -5}] * 15
         )
         import threading as _threading
+        if stuck_flag is not None:
+            stuck_flag[0] = True
         def _dig_up_worker():
-            for _ in range(10):
-                controller.replay_skill(dig_frames)
-                import time as _time
-                _time.sleep(len(dig_frames) / 60.0)
-                s = perception.detect(frame=None)
-                if s and _overhead_clear(s):
-                    break
-            dir_name = state.player.direction
-            frames = _load_skill_frames(f"big_pillar_jump_{dir_name}")
-            if frames:
-                print(f"[卡住] 挖穿，触发 big_pillar_jump_{dir_name}")
-                controller.replay_skill(frames)
+            try:
+                for _ in range(10):
+                    controller.replay_skill(dig_frames)
+                    import time as _time
+                    _time.sleep(len(dig_frames) / 60.0)
+                    s = perception.detect(frame=None)
+                    if s and _overhead_clear(s):
+                        break
+                dir_name = state.player.direction
+                frames = _load_skill_frames(f"big_pillar_jump_{dir_name}")
+                if frames:
+                    print(f"[卡住] 挖穿，触发 big_pillar_jump_{dir_name}")
+                    controller.replay_skill(frames)
+            finally:
+                if stuck_flag is not None:
+                    stuck_flag[0] = False
         _threading.Thread(target=_dig_up_worker, daemon=True).start()
         return True
     return False
@@ -375,6 +381,7 @@ def run() -> None:
     deadline: float = time.time() + _DEFAULT_DEADLINE
     _pending_context: list[str] = []
     FightCoordinator_active = [False]
+    _stuck_handling = [False]
     _prev_tool_weapon_slots: set[int] = set()
     _cave_bypass_active = [False]
     _explore_direction: str = "right"
@@ -385,6 +392,10 @@ def run() -> None:
         if state.player.hp == 0:
             print("[agent] 等待游戏状态...")
             time.sleep(2.0)
+            continue
+
+        if _stuck_handling[0]:
+            time.sleep(_EXEC_TICK)
             continue
 
         if state.biome and (not visited_biomes or visited_biomes[-1] != state.biome):
@@ -436,7 +447,7 @@ def run() -> None:
                         organize_hotbar(state.inventory_slots)
                         if "stuck" in result:
                             ps = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
-                            _handle_stuck(state, controller, ps, perception)
+                            _handle_stuck(state, controller, ps, perception, _stuck_handling)
                         deadline = 0.0
                     goal_exec.start(goal_name, target, timeout, _on_goal_done)
                     current_ctrl = {}
@@ -493,7 +504,7 @@ def run() -> None:
                 print(f"[触发:{trigger_reason}]")
                 if trigger_reason == "卡住":
                     pickaxe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
-                    if _handle_stuck(state, controller, pickaxe_slot, perception):
+                    if _handle_stuck(state, controller, pickaxe_slot, perception, _stuck_handling):
                         continue
                 llm_thread = threading.Thread(
                     target=llm_worker, args=(state_text, trigger_reason), daemon=True
