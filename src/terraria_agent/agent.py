@@ -339,7 +339,8 @@ def run() -> None:
     llm = LLMClient()
     tactician = Tactician()
     trigger = TriggerDetector()
-    goal_exec = GoalExecutor(controller)
+    _stuck_handling = [False]
+    goal_exec = GoalExecutor(controller, stuck_flag=_stuck_handling)
     print("[agent] 启动 — ctrl+c 停止")
 
     first_state = None
@@ -376,7 +377,6 @@ def run() -> None:
     deadline: float = time.time() + _DEFAULT_DEADLINE
     _pending_context: list[str] = []
     FightCoordinator_active = [False]
-    _stuck_handling = [False]
     _prev_tool_weapon_slots: set[int] = set()
     _cave_bypass_active = [False]
     _explore_direction: str = "right"
@@ -431,8 +431,9 @@ def run() -> None:
                         nonlocal deadline
                         organize_hotbar(state.inventory_slots)
                         if "stuck" in result:
-                            ps = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
-                            _handle_stuck(state, controller, ps, perception, _stuck_handling)
+                            fresh = perception.detect(frame=None)
+                            ps = next((s.slot_index for s in fresh.inventory_slots[:10] if s.is_pickaxe), None)
+                            _handle_stuck(fresh, controller, ps, perception, _stuck_handling)
                         deadline = 0.0
                     goal_exec.start(goal_name, target, timeout, _on_goal_done)
                     current_ctrl = {}
