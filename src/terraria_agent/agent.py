@@ -435,7 +435,8 @@ def run() -> None:
                         nonlocal deadline
                         organize_hotbar(state.inventory_slots)
                         if "stuck" in result:
-                            _handle_stuck(state)
+                            ps = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
+                            _handle_stuck(state, controller, ps, perception)
                         deadline = 0.0
                     goal_exec.start(goal_name, target, timeout, _on_goal_done)
                     current_ctrl = {}
