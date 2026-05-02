@@ -358,6 +358,23 @@ def run() -> None:
                 state_text = serialize(state, focus=trigger_reason)
                 state_text += f"\ntrees_chopped={_trees_chopped[0]}/{_TREE_CHOP_LIMIT}"
                 print(f"[触发:{trigger_reason}]")
+                if trigger_reason == "卡住":
+                    from terraria_agent.pit_detector import _surface_y
+                    p = state.player
+                    tw = state.tile_window
+                    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
+                    feet_y = int((p.pos[1] + p.height) / 16.0)
+                    sign = 1 if p.direction == "right" else -1
+                    surf = []
+                    for i in range(1, 16):
+                        cx = pcx + sign * i
+                        sy = _surface_y(tw, cx, feet_y - 1) if tw else None
+                        surf.append(sy - feet_y if sy is not None else "?")
+                    print(f"[卡住诊断] pos=({pcx},{feet_y}) dir={p.direction} vel={p.velocity}")
+                    print(f"[卡住诊断] 前方地表相对高度: {surf}")
+                    if state.terrain_scan:
+                        ts = state.terrain_scan
+                        print(f"[卡住诊断] terrain={ts.terrain_type.value} dist={ts.distance_tiles} size={ts.depth_or_height}")
                 llm_thread = threading.Thread(
                     target=llm_worker, args=(state_text, trigger_reason), daemon=True
                 )
