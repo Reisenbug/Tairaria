@@ -251,7 +251,7 @@ def _overhead_shallow(state) -> bool:
     return False
 
 
-def _handle_stuck(state, controller=None, pickaxe_slot=None, perception=None, stuck_flag=None) -> bool:
+def _handle_stuck(state, controller=None, perception=None, stuck_flag=None) -> bool:
     from terraria_agent.pit_detector import _surface_y
     p = state.player
     tw = state.tile_window
@@ -296,11 +296,11 @@ def _handle_stuck(state, controller=None, pickaxe_slot=None, perception=None, st
         print("[卡住地图] (顶=头顶15格, 底=脚底, @=玩家, #=solid, ==platform, ~=水, L=岩浆)")
         for row in rows:
             print(" " + row)
-    if shallow and controller is not None and pickaxe_slot is not None and perception is not None:
+    if shallow and controller is not None and perception is not None:
         print(f"[卡住] 头顶有方块，向上挖掘...")
         dig_frames = (
-            [{"use_item": True, "sc": 1, "selected_slot": pickaxe_slot, "mx": 0, "my": -5, "jump": True}] * 15 +
-            [{"use_item": True, "sc": 1, "selected_slot": pickaxe_slot, "mx": 0, "my": -5}] * 15
+            [{"use_item": True, "sc": 1, "selected_slot": 2, "mx": 0, "my": -5, "jump": True}] * 15 +
+            [{"use_item": True, "sc": 1, "selected_slot": 2, "mx": 0, "my": -5}] * 15
         )
         import threading as _threading
         if stuck_flag is not None:
@@ -379,8 +379,7 @@ def run() -> None:
                 organize_hotbar(fresh.inventory_slots)
         if "stuck" in result:
             fresh = perception.detect(frame=None)
-            ps = next((s.slot_index for s in fresh.inventory_slots[:10] if s.is_pickaxe), None)
-            _handle_stuck(fresh, controller, ps, perception, _stuck_handling)
+            _handle_stuck(fresh, controller, perception, _stuck_handling)
         deadline = 0.0
 
     def _start_goal(goal_name: str, target: dict, timeout: float) -> None:
@@ -510,8 +509,7 @@ def run() -> None:
                 state_text += f"\ntrees_chopped={_trees_chopped[0]}/{_TREE_CHOP_LIMIT}"
                 print(f"[触发:{trigger_reason}]")
                 if trigger_reason == "卡住":
-                    pickaxe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
-                    if _handle_stuck(state, controller, pickaxe_slot, perception, _stuck_handling):
+                    if _handle_stuck(state, controller, perception, _stuck_handling):
                         continue
                 llm_thread = threading.Thread(
                     target=llm_worker, args=(state_text, trigger_reason), daemon=True

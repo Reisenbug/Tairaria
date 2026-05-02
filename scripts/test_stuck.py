@@ -26,8 +26,7 @@ while True:
 
     if reason == "卡住":
         print(f"[STUCK] pos=({p.pos[0]/16:.1f}, {p.pos[1]/16:.1f})t  shallow={shallow}")
-        pickaxe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
-        _handle_stuck(state, controller, pickaxe_slot, perception, [False])
+        _handle_stuck(state, controller, perception, [False])
         current_ctrl = {"right": True}
 
     time.sleep(0.2)
