@@ -11,6 +11,10 @@ _TILE = 16.0
 _ARRIVE_DIST = 3.0
 
 
+_NAV_STUCK_SECONDS = 2.0
+_NAV_STUCK_MIN_PROGRESS = 0.5
+
+
 class GoalExecutor:
     def __init__(self, controller: ModController) -> None:
         self._ctrl = controller
@@ -20,6 +24,8 @@ class GoalExecutor:
         self._deadline: float = 0.0
         self._on_done: Callable[[str], None] | None = None
         self._phase: str = ""
+        self._nav_best_dist: float = float("inf")
+        self._nav_best_time: float = 0.0
 
     @property
     def active(self) -> bool:
@@ -32,6 +38,8 @@ class GoalExecutor:
         self._deadline = time.time() + timeout
         self._on_done = on_done
         self._phase = "navigate"
+        self._nav_best_dist = float("inf")
+        self._nav_best_time = time.time()
         print(f"[goal] 开始 {goal} target={target} timeout={timeout}s")
 
     def cancel(self) -> None:
@@ -148,6 +156,15 @@ class GoalExecutor:
         p = state.player
         pcx = p.pos[0] + p.width / 2.0
         tcx = obj.pos[0] + _TILE
+        dist = abs(pcx - tcx) / _TILE
+        now = time.time()
+        if dist < self._nav_best_dist - _NAV_STUCK_MIN_PROGRESS:
+            self._nav_best_dist = dist
+            self._nav_best_time = now
+        elif now - self._nav_best_time >= _NAV_STUCK_SECONDS:
+            print(f"[goal] navigate 卡住 dist={dist:.1f} best={self._nav_best_dist:.1f}")
+            self._finish("stuck")
+            return {}
         direction = "right" if tcx > pcx else "left"
         return {direction: True}
 
