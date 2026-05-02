@@ -53,7 +53,6 @@ timeout 建议：open_chest 15，chop_tree 30。
 
 - 树木不挡路，玩家可以直接穿过
 - terrain_ahead=block_wall 或 pit：继续 explore，mod自动跳跃处理
-- 血量低于30%系统自动中断撤退，不需要你处理
 - 熔岩(lava)附近立刻 retreat
 - trees_chopped=N/2：已自动砍了N棵高树，达到2棵后不要再主动砍树
 

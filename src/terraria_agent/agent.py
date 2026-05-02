@@ -327,15 +327,10 @@ def _handle_stuck(state, controller=None, pickaxe_slot=None, perception=None, st
     return False
 
 
-def _safety_interrupt(state, controller, fight_active) -> str | None:
+def _safety_interrupt(state, controller) -> None:
     p = state.player
-    if p.hp >= p.max_hp * 0.3:
-        return None
-    controller._http_fire("http://127.0.0.1:17878/quick_heal")
-    if fight_active[0]:
-        controller.fight_stop()
-        fight_active[0] = False
-    return "血量低"
+    if p.hp < p.max_hp * 0.3:
+        controller._http_fire("http://127.0.0.1:17878/quick_heal")
 
 
 def run() -> None:
@@ -418,17 +413,7 @@ def run() -> None:
             organize_hotbar(state.inventory_slots)
         _prev_tool_weapon_slots = cur_tool_weapon
 
-        reason = _safety_interrupt(state, controller, FightCoordinator_active)
-        if reason:
-            print(f"[agent] 安全中断: {reason}")
-            if state.enemies:
-                nearest = min(state.enemies, key=lambda e: e.distance)
-                p = state.player
-                retreat_dir = "left" if nearest.pos[0] > p.pos[0] else "right"
-            else:
-                retreat_dir = "left" if state.player.direction == "right" else "right"
-            current_ctrl = {retreat_dir: True}
-            deadline = now + 5.0
+        _safety_interrupt(state, controller)
 
         with pending_lock:
             if pending is not None:
