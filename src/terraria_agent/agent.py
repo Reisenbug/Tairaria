@@ -41,7 +41,7 @@ _FRUITS = {
 _WEAPONS_CATEGORY = "weapon"
 
 
-_STUCK_WINDOW = 3.0
+_STUCK_WINDOW = 1.0
 _STUCK_NET_TILES = 1.0
 
 class TriggerDetector:
