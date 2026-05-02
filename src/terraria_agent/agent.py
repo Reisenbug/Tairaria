@@ -225,17 +225,19 @@ def _cave_bypass_worker(controller, cave_dir: str) -> None:
     print(f"[cave bypass] replay {len(frames)} 帧")
     controller.replay_skill(frames)
 
-def _overhead_clearance(state) -> int:
+def _overhead_clear(state) -> bool:
     tw = state.tile_window
     if tw is None:
-        return 99
+        return True
     p = state.player
     head_y = int(p.pos[1] / 16.0)
-    for dy in range(1, 16):
-        t = tw.tile_at(int((p.pos[0] + p.width / 2.0) / 16.0), head_y - dy)
-        if t is not None and t.solid:
-            return dy - 1
-    return 99
+    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
+    for col in (pcx, pcx + 1):
+        for dy in range(1, 11):
+            t = tw.tile_at(col, head_y - dy)
+            if t is not None and t.solid:
+                return False
+    return True
 
 
 def _safety_interrupt(state, controller, fight_active) -> str | None:
@@ -417,24 +419,26 @@ def run() -> None:
                         cx = pcx + sign * i
                         sy = _surface_y(tw, cx, feet_y - 1) if tw else None
                         surf.append(sy - feet_y if sy is not None else "?")
-                    clearance = _overhead_clearance(state)
-                    print(f"[卡住诊断] pos=({pcx},{feet_y}) dir={p.direction} clearance={clearance}")
+                    overhead_clear = _overhead_clear(state)
+                    print(f"[卡住诊断] pos=({pcx},{feet_y}) dir={p.direction} overhead_clear={overhead_clear}")
                     print(f"[卡住诊断] 前方地表相对高度: {surf}")
                     if state.terrain_scan:
                         ts = state.terrain_scan
                         print(f"[卡住诊断] terrain={ts.terrain_type.value} dist={ts.distance_tiles} size={ts.depth_or_height}")
-                    if clearance < 3:
+                    if not overhead_clear:
                         pickaxe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
                         if pickaxe_slot is not None:
-                            print(f"[卡住] 头顶空隙{clearance}格，向上挖掘...")
+                            print(f"[卡住] 头顶有方块，向上挖掘...")
+                            dig_frames = (
+                                [{"use_item": True, "sc": 1, "selected_slot": pickaxe_slot, "mx": 0, "my": -5, "jump": True}] * 15 +
+                                [{"use_item": True, "sc": 1, "selected_slot": pickaxe_slot, "mx": 0, "my": -5}] * 15
+                            )
                             def _dig_up_worker():
-                                for _ in range(30):
-                                    controller._post_control({"use_item": True, "sc": 1,
-                                                              "selected_slot": pickaxe_slot,
-                                                              "mx": 0, "my": -5})
-                                    time.sleep(0.2)
+                                for _ in range(10):
+                                    controller.replay_skill(dig_frames)
+                                    time.sleep(len(dig_frames) / 60.0)
                                     s = perception.detect(frame=None)
-                                    if s and _overhead_clearance(s) >= 3:
+                                    if s and _overhead_clear(s):
                                         break
                                 dir_name = state.player.direction
                                 frames = _load_skill_frames(f"big_pillar_jump_{dir_name}")
