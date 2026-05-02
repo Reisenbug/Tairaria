@@ -251,6 +251,76 @@ def _overhead_shallow(state) -> bool:
     return False
 
 
+def _handle_stuck(state, controller=None, pickaxe_slot=None, perception=None) -> bool:
+    from terraria_agent.pit_detector import _surface_y
+    p = state.player
+    tw = state.tile_window
+    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
+    feet_y = int((p.pos[1] + p.height) / 16.0)
+    sign = 1 if p.direction == "right" else -1
+    surf = []
+    for i in range(1, 16):
+        cx = pcx + sign * i
+        sy = _surface_y(tw, cx, feet_y - 1) if tw else None
+        surf.append(sy - feet_y if sy is not None else "?")
+    overhead_clear = _overhead_clear(state)
+    shallow = _overhead_shallow(state)
+    print(f"[卡住诊断] pos=({pcx},{feet_y}) dir={p.direction} overhead_clear={overhead_clear} shallow={shallow}")
+    print(f"[卡住诊断] 前方地表相对高度: {surf}")
+    if state.terrain_scan:
+        ts = state.terrain_scan
+        print(f"[卡住诊断] terrain={ts.terrain_type.value} dist={ts.distance_tiles} size={ts.depth_or_height}")
+    if tw:
+        rows = []
+        for dy in range(-15, 1):
+            row = ""
+            for dx in range(-20, 21):
+                cx, cy = pcx + dx, feet_y + dy
+                if abs(dx) <= 1 and dy >= -3 and dy <= 0:
+                    row += "@"
+                    continue
+                t = tw.tile_at(cx, cy)
+                if t is None:
+                    row += "?"
+                elif t.lava:
+                    row += "L"
+                elif t.water:
+                    row += "~"
+                elif t.platform:
+                    row += "="
+                elif t.solid:
+                    row += "#"
+                else:
+                    row += "."
+            rows.append(row)
+        print("[卡住地图] (顶=头顶15格, 底=脚底, @=玩家, #=solid, ==platform, ~=水, L=岩浆)")
+        for row in rows:
+            print(" " + row)
+    if shallow and controller is not None and pickaxe_slot is not None and perception is not None:
+        print(f"[卡住] 头顶有方块，向上挖掘...")
+        dig_frames = (
+            [{"use_item": True, "sc": 1, "selected_slot": pickaxe_slot, "mx": 0, "my": -5, "jump": True}] * 15 +
+            [{"use_item": True, "sc": 1, "selected_slot": pickaxe_slot, "mx": 0, "my": -5}] * 15
+        )
+        import threading as _threading
+        def _dig_up_worker():
+            for _ in range(10):
+                controller.replay_skill(dig_frames)
+                import time as _time
+                _time.sleep(len(dig_frames) / 60.0)
+                s = perception.detect(frame=None)
+                if s and _overhead_clear(s):
+                    break
+            dir_name = state.player.direction
+            frames = _load_skill_frames(f"big_pillar_jump_{dir_name}")
+            if frames:
+                print(f"[卡住] 挖穿，触发 big_pillar_jump_{dir_name}")
+                controller.replay_skill(frames)
+        _threading.Thread(target=_dig_up_worker, daemon=True).start()
+        return True
+    return False
+
+
 def _safety_interrupt(state, controller, fight_active) -> str | None:
     p = state.player
     if p.hp >= p.max_hp * 0.3:
@@ -364,6 +434,8 @@ def run() -> None:
                         print(f"[goal] 完成: {result}")
                         nonlocal deadline
                         organize_hotbar(state.inventory_slots)
+                        if "stuck" in result:
+                            _handle_stuck(state)
                         deadline = 0.0
                     goal_exec.start(goal_name, target, timeout, _on_goal_done)
                     current_ctrl = {}
@@ -419,72 +491,9 @@ def run() -> None:
                 state_text += f"\ntrees_chopped={_trees_chopped[0]}/{_TREE_CHOP_LIMIT}"
                 print(f"[触发:{trigger_reason}]")
                 if trigger_reason == "卡住":
-                    from terraria_agent.pit_detector import _surface_y
-                    p = state.player
-                    tw = state.tile_window
-                    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
-                    feet_y = int((p.pos[1] + p.height) / 16.0)
-                    sign = 1 if p.direction == "right" else -1
-                    surf = []
-                    for i in range(1, 16):
-                        cx = pcx + sign * i
-                        sy = _surface_y(tw, cx, feet_y - 1) if tw else None
-                        surf.append(sy - feet_y if sy is not None else "?")
-                    overhead_clear = _overhead_clear(state)
-                    shallow = _overhead_shallow(state)
-                    print(f"[卡住诊断] pos=({pcx},{feet_y}) dir={p.direction} overhead_clear={overhead_clear} shallow={shallow}")
-                    print(f"[卡住诊断] 前方地表相对高度: {surf}")
-                    if state.terrain_scan:
-                        ts = state.terrain_scan
-                        print(f"[卡住诊断] terrain={ts.terrain_type.value} dist={ts.distance_tiles} size={ts.depth_or_height}")
-                    if tw:
-                        rows = []
-                        for dy in range(-15, 1):
-                            row = ""
-                            for dx in range(-20, 21):
-                                cx, cy = pcx + dx, feet_y + dy
-                                if abs(dx) <= 1 and dy >= -3 and dy <= 0:
-                                    row += "@"
-                                    continue
-                                t = tw.tile_at(cx, cy)
-                                if t is None:
-                                    row += "?"
-                                elif t.lava:
-                                    row += "L"
-                                elif t.water:
-                                    row += "~"
-                                elif t.platform:
-                                    row += "="
-                                elif t.solid:
-                                    row += "#"
-                                else:
-                                    row += "."
-                            rows.append(row)
-                        print("[卡住地图] (顶=头顶15格, 底=脚底, @=玩家, #=solid, ==platform, ~=水, L=岩浆)")
-                        for row in rows:
-                            print(" " + row)
-                    if shallow:
-                        pickaxe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
-                        if pickaxe_slot is not None:
-                            print(f"[卡住] 头顶有方块，向上挖掘...")
-                            dig_frames = (
-                                [{"use_item": True, "sc": 1, "selected_slot": pickaxe_slot, "mx": 0, "my": -5, "jump": True}] * 15 +
-                                [{"use_item": True, "sc": 1, "selected_slot": pickaxe_slot, "mx": 0, "my": -5}] * 15
-                            )
-                            def _dig_up_worker():
-                                for _ in range(10):
-                                    controller.replay_skill(dig_frames)
-                                    time.sleep(len(dig_frames) / 60.0)
-                                    s = perception.detect(frame=None)
-                                    if s and _overhead_clear(s):
-                                        break
-                                dir_name = state.player.direction
-                                frames = _load_skill_frames(f"big_pillar_jump_{dir_name}")
-                                if frames:
-                                    print(f"[卡住] 挖穿，触发 big_pillar_jump_{dir_name}")
-                                    controller.replay_skill(frames)
-                            threading.Thread(target=_dig_up_worker, daemon=True).start()
-                            continue
+                    pickaxe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
+                    if _handle_stuck(state, controller, pickaxe_slot, perception):
+                        continue
                 llm_thread = threading.Thread(
                     target=llm_worker, args=(state_text, trigger_reason), daemon=True
                 )
