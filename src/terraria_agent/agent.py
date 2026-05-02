@@ -26,7 +26,7 @@ _STUCK_SECONDS = 5.0
 _STUCK_SPEED_THRESHOLD = 0.5
 _HP_DROP_THRESHOLD = 0.4
 _TACTICIAN_INTERVAL = 60.0
-_DEFAULT_DEADLINE = 20.0
+_DEFAULT_DEADLINE = 10.0
 
 _FRUITS = {
     "苹果", "杏", "葡萄柚", "柠檬", "桃子",
@@ -260,6 +260,7 @@ def run() -> None:
     FightCoordinator_active = [False]
     _prev_tool_weapon_slots: set[int] = set()
     _cave_bypass_active = [False]
+    _explore_direction: str = "right"
 
     while True:
         now = time.time()
@@ -274,8 +275,14 @@ def run() -> None:
 
         if tactician.is_idle() and now - tactician_last >= _TACTICIAN_INTERVAL:
             tactician_last = now
-            macro_text = serialize_macro(state, goal=tactician.goal, visited_biomes=visited_biomes)
+            macro_text = serialize_macro(state, goal=tactician.goal, visited_biomes=visited_biomes,
+                                         explore_direction=_explore_direction)
             tactician.start(macro_text)
+            goal = tactician.goal
+            if "右" in goal or "right" in goal.lower():
+                _explore_direction = "right"
+            elif "左" in goal or "left" in goal.lower():
+                _explore_direction = "left"
 
         cur_tool_weapon = {s.slot_index for s in state.inventory_slots
                            if not s.is_empty and (s.is_weapon or s.is_axe or s.is_pickaxe)}

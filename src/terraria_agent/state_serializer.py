@@ -86,7 +86,8 @@ def serialize(state: GameState, focus: str = "deadline") -> str:
     return "\n".join(lines)
 
 
-def serialize_macro(state: GameState, goal: str = "", visited_biomes: list[str] | None = None) -> str:
+def serialize_macro(state: GameState, goal: str = "", visited_biomes: list[str] | None = None,
+                    explore_direction: str = "") -> str:
     p = state.player
     lines: list[str] = []
 
@@ -94,6 +95,18 @@ def serialize_macro(state: GameState, goal: str = "", visited_biomes: list[str] 
     lines.append(f"biome={state.biome}")
     if visited_biomes:
         lines.append(f"visited_biomes={','.join(visited_biomes)}")
+
+    if explore_direction:
+        lines.append(f"explore_direction={explore_direction}")
+
+    if state.detected_tiles:
+        parts = [t.name for t in state.detected_tiles]
+        lines.append(f"detected_tiles={parts}")
+
+    if state.enemies:
+        close = sorted(state.enemies, key=lambda e: e.distance)[:3]
+        parts = [f"{e.type}(hp={e.hp}/{e.max_hp},dist={e.distance:.0f})" for e in close]
+        lines.append(f"enemies=[{', '.join(parts)}]")
 
     inv_summary = {k: v for k, v in state.inventory.items() if v > 0}
     if inv_summary:
@@ -104,6 +117,6 @@ def serialize_macro(state: GameState, goal: str = "", visited_biomes: list[str] 
         lines.append(f"have_categories={','.join(sorted(categories))}")
 
     if goal:
-        lines.append(f"current_goal={goal}")
+        lines.append(f"prev_goal={goal}")
 
     return "\n".join(lines)

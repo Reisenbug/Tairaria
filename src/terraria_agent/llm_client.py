@@ -64,6 +64,7 @@ timeout 建议：open_chest 15，chop_tree 30。
 - biome=snow 或 corruption 或 crimson → 丛林在另一侧，换方向
 - biome=jungle → 已到达丛林，继续探索即可
 - 确定方向后坚持，不要频繁换向
+- 状态与上次相似且目标未完成，直接继续上次的 skill，无需重新分析
 
 ## 示例
 
