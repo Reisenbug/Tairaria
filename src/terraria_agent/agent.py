@@ -41,6 +41,9 @@ _FRUITS = {
 _WEAPONS_CATEGORY = "weapon"
 
 
+_STUCK_WINDOW = 3.0
+_STUCK_NET_TILES = 1.0
+
 class TriggerDetector:
     def __init__(self) -> None:
         self._prev_enemy_ids: set[int] = set()
@@ -50,23 +53,24 @@ class TriggerDetector:
         self._prev_max_hp: int = 1
         self._prev_chest_ids: set[tuple[int, int]] = set()
         self._prev_drop_names: set[str] = set()
-        self._moving_since: float | None = None
+        self._pos_history: list[tuple[float, float]] = []
 
     def check(self, state: GameState, current_ctrl: dict, now: float) -> str | None:
         p = state.player
 
         has_horizontal = current_ctrl.get("left") or current_ctrl.get("right")
-        on_ground = abs(p.velocity[1]) < 0.1
-        if has_horizontal and on_ground and abs(p.velocity[0]) < _STUCK_SPEED_THRESHOLD:
-            if self._moving_since is None:
-                self._moving_since = now
-            elif now - self._moving_since >= _STUCK_SECONDS:
-                self._moving_since = None
-                return "卡住"
+        if has_horizontal:
+            self._pos_history.append((now, p.pos[0]))
+            self._pos_history = [(t, x) for t, x in self._pos_history if now - t <= _STUCK_WINDOW]
+            if len(self._pos_history) >= 2:
+                oldest_x = self._pos_history[0][1]
+                net = abs(p.pos[0] - oldest_x) / _TILE
+                elapsed = now - self._pos_history[0][0]
+                if elapsed >= _STUCK_WINDOW and net < _STUCK_NET_TILES:
+                    self._pos_history.clear()
+                    return "卡住"
         else:
-            self._moving_since = None
-
-        # 3. 血量骤降 40%
+            self._pos_history.clear()
         if self._prev_hp >= 0:
             drop = self._prev_hp - p.hp
             if drop > self._prev_max_hp * _HP_DROP_THRESHOLD:
@@ -77,20 +81,14 @@ class TriggerDetector:
 
         cur_ids = {e.who for e in state.enemies}
         self._prev_enemy_ids = cur_ids
-
-        # 5. 地形突变 flat → pit
         if self._prev_terrain == TerrainType.FLAT and state.terrain_ahead == TerrainType.PIT:
             self._prev_terrain = state.terrain_ahead
             return "地形突变_pit"
         self._prev_terrain = state.terrain_ahead
-
-        # 6. 生物群系切换
         if self._prev_biome and self._prev_biome != state.biome:
             self._prev_biome = state.biome
             return "生物群系切换"
         self._prev_biome = state.biome
-
-        # 8. 新武器或水果掉落
         cur_drop_names = {d.name for d in state.dropped_items}
         new_drops = cur_drop_names - self._prev_drop_names
         self._prev_drop_names = cur_drop_names
@@ -102,8 +100,6 @@ class TriggerDetector:
                 slot = next((s for s in state.inventory_slots if s.name == d.name), None)
                 if slot and slot.category == _WEAPONS_CATEGORY:
                     return f"掉落_武器_{d.name}"
-
-        # 9. 发现新箱子
         cur_chests = {o.tile_pos for o in state.objects if o.type == "chest"}
         new_chests = cur_chests - self._prev_chest_ids
         self._prev_chest_ids = cur_chests
@@ -238,6 +234,21 @@ def _overhead_clear(state) -> bool:
             if t is not None and t.solid:
                 return False
     return True
+
+
+def _overhead_shallow(state) -> bool:
+    tw = state.tile_window
+    if tw is None:
+        return False
+    p = state.player
+    head_y = int(p.pos[1] / 16.0)
+    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
+    for col in (pcx, pcx + 1):
+        for dy in range(1, 4):
+            t = tw.tile_at(col, head_y - dy)
+            if t is not None and t.solid:
+                return True
+    return False
 
 
 def _safety_interrupt(state, controller, fight_active) -> str | None:
@@ -420,7 +431,8 @@ def run() -> None:
                         sy = _surface_y(tw, cx, feet_y - 1) if tw else None
                         surf.append(sy - feet_y if sy is not None else "?")
                     overhead_clear = _overhead_clear(state)
-                    print(f"[卡住诊断] pos=({pcx},{feet_y}) dir={p.direction} overhead_clear={overhead_clear}")
+                    shallow = _overhead_shallow(state)
+                    print(f"[卡住诊断] pos=({pcx},{feet_y}) dir={p.direction} overhead_clear={overhead_clear} shallow={shallow}")
                     print(f"[卡住诊断] 前方地表相对高度: {surf}")
                     if state.terrain_scan:
                         ts = state.terrain_scan
@@ -451,7 +463,7 @@ def run() -> None:
                         print("[卡住地图] (顶=头顶15格, 底=脚底, @=玩家, #=solid, ==platform, ~=水, L=岩浆)")
                         for row in rows:
                             print(" " + row)
-                    if not overhead_clear:
+                    if shallow:
                         pickaxe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_pickaxe), None)
                         if pickaxe_slot is not None:
                             print(f"[卡住] 头顶有方块，向上挖掘...")
