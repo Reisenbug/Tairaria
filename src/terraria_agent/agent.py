@@ -163,20 +163,36 @@ def _parse_actions(ctrl: dict, state: GameState) -> list[GameAction]:
 
 _SKILL_DIR = __import__("pathlib").Path(__file__).parent.parent.parent / "skills"
 
+def _mirror_frame(f: dict) -> dict:
+    m = dict(f)
+    if "mx" in m:
+        m["mx"] = -m["mx"]
+    if m.get("right"):
+        del m["right"]
+        m["left"] = True
+    elif m.get("left"):
+        del m["left"]
+        m["right"] = True
+    return m
+
+
 def _load_skill_frames(name: str) -> list:
     import json
     path = _SKILL_DIR / f"{name}.json"
+    mirror = False
+    if not path.exists() and name.endswith("_left"):
+        path = _SKILL_DIR / f"{name[:-5]}_right.json"
+        mirror = True
     if not path.exists():
         return []
     data = json.loads(path.read_text())
-    if isinstance(data, dict):
-        frames = data.get("frames", [])
-    else:
-        frames = data
+    frames = data.get("frames", []) if isinstance(data, dict) else data
     result = []
     for f in frames:
         n = f.get("repeat", 1)
         base = {k: v for k, v in f.items() if k != "repeat"}
+        if mirror:
+            base = _mirror_frame(base)
         result.extend([base] * n)
     return result
 
