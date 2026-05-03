@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient, scan_surface
+from terraria_agent.terrain_nav import Navigator
 from terraria_agent.geometry import player_center_world, world_to_screen
 from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.llm_client import LLMClient
@@ -407,6 +408,7 @@ def run() -> None:
     trigger = TriggerDetector()
     _stuck_handling = [False]
     goal_exec = GoalExecutor(controller)
+    nav = Navigator(controller, _load_skill_frames)
     print("[agent] 启动 — ctrl+c 停止")
 
     first_state = None
@@ -624,6 +626,15 @@ def run() -> None:
                 controller._post_control(goal_ctrl)
                 time.sleep(_EXEC_TICK)
                 continue
+            else:
+                actions = [GameAction(action=ActionType.NONE)]
+        elif not goal_exec.active and not _stuck_handling[0]:
+            nav.set_direction(_explore_direction)
+            nav_ctrl = nav.tick(state)
+            if nav_ctrl is not None:
+                actions = _parse_actions(nav_ctrl, state) if nav_ctrl else [GameAction(action=ActionType.NONE)]
+            elif current_ctrl:
+                actions = _parse_actions(current_ctrl, state)
             else:
                 actions = [GameAction(action=ActionType.NONE)]
         elif current_ctrl:
