@@ -274,19 +274,23 @@ def print_surface_map(state) -> None:
     p = state.player
     pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
     feet_y = int((p.pos[1] + p.height) / 16.0)
-    surface = {wx: wy for wx, wy in scan_surface(tw, pcx, half_width=20) if wy is not None}
+    surface = scan_surface(tw)
+    ox, oy = tw.origin
     rows = []
-    for dy in range(-15, 1):
+    for ry in range(tw.height):
+        wy = oy + ry
         row = ""
-        for dx in range(-20, 21):
-            cx, cy = pcx + dx, feet_y + dy
-            if dx in (0, 1) and dy >= -3 and dy <= 0:
+        for rx in range(tw.width):
+            wx = ox + rx
+            dx = wx - pcx
+            dy = wy - feet_y
+            if dx in (0, 1) and dy >= -2 and dy <= 0:
                 row += "@"
                 continue
-            if surface.get(cx) == cy:
+            if surface.get(wx) == wy:
                 row += "^"
                 continue
-            t = tw.tile_at(cx, cy)
+            t = tw.tile_at(wx, wy)
             if t is None:
                 row += "?"
             elif t.lava:
@@ -299,10 +303,10 @@ def print_surface_map(state) -> None:
                 row += "#"
             else:
                 row += "."
-        rows.append(row)
-    print("[地图] (@=玩家, ^=落脚点, #=solid, ==platform, ~=水, L=岩浆)")
+        rows.append(f"{wy:4d} {row}")
+    print(f"[地图] pos=({pcx},{feet_y}) (@=玩家, ^=落脚点, #=solid)")
     for row in rows:
-        print(" " + row)
+        print(row)
 
 
 def _handle_stuck(state, controller=None, perception=None, stuck_flag=None) -> bool:

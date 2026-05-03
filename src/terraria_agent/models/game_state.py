@@ -186,7 +186,7 @@ class TileRun(BaseModel):
 class TileWindow(BaseModel):
     origin: tuple[int, int] = (0, 0)
     width: int = 120
-    height: int = 80
+    height: int = 70
     rows: list[list[TileRun]] = []
 
     def tile_at(self, world_x: int, world_y: int) -> Optional[TileRun]:

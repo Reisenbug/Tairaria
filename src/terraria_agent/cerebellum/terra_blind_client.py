@@ -182,18 +182,18 @@ def _scan_terrain(tw: TileWindow, player: Player, movement: MovementInfo) -> Ter
     return TerrainScan(terrain_type=TerrainType.FLAT, distance_tiles=_SCAN_COLUMNS, depth_or_height=0)
 
 
-def scan_surface(tw: TileWindow, center_x: int, half_width: int = 20) -> list[tuple[int, int | None]]:
-    """Return [(world_x, surface_y), ...] for each column in [center_x-half_width, center_x+half_width].
-    surface_y is the world_y of the topmost solid tile in that column, or None if not found."""
-    result = []
-    for wx in range(center_x - half_width, center_x + half_width + 1):
-        surface_y = None
-        for wy in range(tw.origin[1], tw.origin[1] + tw.height):
+def scan_surface(tw: TileWindow) -> dict[int, int]:
+    """Return {world_x: surface_y} for every column in tile_window.
+    surface_y is the world_y of the topmost solid tile. Columns with no solid tile are omitted."""
+    result = {}
+    for rx in range(tw.width):
+        wx = tw.origin[0] + rx
+        for ry in range(tw.height):
+            wy = tw.origin[1] + ry
             t = tw.tile_at(wx, wy)
             if t is not None and t.solid:
-                surface_y = wy
+                result[wx] = wy
                 break
-        result.append((wx, surface_y))
     return result
 
 
