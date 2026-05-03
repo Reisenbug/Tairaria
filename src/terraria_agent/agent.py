@@ -6,7 +6,7 @@ import threading
 from dotenv import load_dotenv
 load_dotenv()
 
-from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient
+from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient, scan_surface
 from terraria_agent.geometry import player_center_world, world_to_screen
 from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.llm_client import LLMClient
@@ -251,6 +251,60 @@ def _overhead_shallow(state) -> bool:
     return False
 
 
+def _overhead_deep(state) -> bool:
+    tw = state.tile_window
+    if tw is None:
+        return False
+    p = state.player
+    head_y = int(p.pos[1] / 16.0)
+    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
+    for col in (pcx, pcx + 1):
+        for dy in range(4, 11):
+            t = tw.tile_at(col, head_y - dy)
+            if t is not None and t.solid:
+                return True
+    return False
+
+
+def print_surface_map(state) -> None:
+    tw = state.tile_window
+    if tw is None:
+        print("[surface_map] 无 tile_window")
+        return
+    p = state.player
+    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
+    feet_y = int((p.pos[1] + p.height) / 16.0)
+    surface = {wx: wy for wx, wy in scan_surface(tw, pcx, half_width=20) if wy is not None}
+    rows = []
+    for dy in range(-15, 1):
+        row = ""
+        for dx in range(-20, 21):
+            cx, cy = pcx + dx, feet_y + dy
+            if dx in (0, 1) and dy >= -3 and dy <= 0:
+                row += "@"
+                continue
+            if surface.get(cx) == cy:
+                row += "^"
+                continue
+            t = tw.tile_at(cx, cy)
+            if t is None:
+                row += "?"
+            elif t.lava:
+                row += "L"
+            elif t.water:
+                row += "~"
+            elif t.platform:
+                row += "="
+            elif t.solid:
+                row += "#"
+            else:
+                row += "."
+        rows.append(row)
+    print("[地图] (@=玩家, ^=落脚点, #=solid, ==platform, ~=水, L=岩浆)")
+    for row in rows:
+        print(" " + row)
+
+
 def _handle_stuck(state, controller=None, perception=None, stuck_flag=None) -> bool:
     from terraria_agent.pit_detector import _surface_y
     p = state.player
@@ -270,59 +324,67 @@ def _handle_stuck(state, controller=None, perception=None, stuck_flag=None) -> b
     if state.terrain_scan:
         ts = state.terrain_scan
         print(f"[卡住诊断] terrain={ts.terrain_type.value} dist={ts.distance_tiles} size={ts.depth_or_height}")
-    if tw:
-        rows = []
-        for dy in range(-15, 1):
-            row = ""
-            for dx in range(-20, 21):
-                cx, cy = pcx + dx, feet_y + dy
-                if dx in (0, 1) and dy >= -3 and dy <= 0:
-                    row += "@"
-                    continue
-                t = tw.tile_at(cx, cy)
-                if t is None:
-                    row += "?"
-                elif t.lava:
-                    row += "L"
-                elif t.water:
-                    row += "~"
-                elif t.platform:
-                    row += "="
-                elif t.solid:
-                    row += "#"
-                else:
-                    row += "."
-            rows.append(row)
-        print("[卡住地图] (顶=头顶15格, 底=脚底, @=玩家, #=solid, ==platform, ~=水, L=岩浆)")
-        for row in rows:
-            print(" " + row)
+    print_surface_map(state)
+    deep = _overhead_deep(state)
     if shallow and controller is not None and perception is not None:
-        print(f"[卡住] 头顶有方块，向上挖掘...")
-        dig_frames = (
-            [{"use_item": True, "sc": 1, "selected_slot": 1, "mx": 0, "my": -5, "jump": True}] * 15 +
-            [{"use_item": True, "sc": 1, "selected_slot": 1, "mx": 0, "my": -5}] * 15
-        )
         import threading as _threading
         if stuck_flag is not None:
             stuck_flag[0] = True
-        def _dig_up_worker():
-            try:
-                for _ in range(10):
-                    controller.replay_skill(dig_frames)
-                    import time as _time
-                    _time.sleep(len(dig_frames) / 60.0)
-                    s = perception.detect(frame=None)
-                    if s and _overhead_clear(s):
-                        break
-                dir_name = state.player.direction
-                frames = _load_skill_frames(f"big_pillar_jump_{dir_name}")
-                if frames:
-                    print(f"[卡住] 挖穿，触发 big_pillar_jump_{dir_name}")
-                    controller.replay_skill(frames)
-            finally:
-                if stuck_flag is not None:
-                    stuck_flag[0] = False
-        _threading.Thread(target=_dig_up_worker, daemon=True).start()
+        dir_name = p.direction
+        if deep:
+            print(f"[卡住] 头顶方块 >3 格，后退找空地 + pillar_jump...")
+            def _retreat_jump_worker():
+                import time as _time
+                try:
+                    back = "left" if dir_name == "right" else "right"
+                    for _ in range(60):
+                        controller._post_control({back: True})
+                        _time.sleep(0.1)
+                        s = perception.detect(frame=None)
+                        if s and _overhead_clear(s):
+                            break
+                    controller._post_control({})
+                    jump_frames = _load_skill_frames("pillar_jump_2_height")
+                    if not jump_frames:
+                        return
+                    if dir_name == "left":
+                        jump_frames = [_mirror_frame(f) for f in jump_frames]
+                    print(f"[卡住] 头顶已清，反复 pillar_jump_2_height 向{dir_name}...")
+                    for _ in range(10):
+                        controller.replay_skill(jump_frames)
+                        _time.sleep(len(jump_frames) / 60.0)
+                finally:
+                    if stuck_flag is not None:
+                        stuck_flag[0] = False
+            _threading.Thread(target=_retreat_jump_worker, daemon=True).start()
+        else:
+            print(f"[卡住] 头顶 ≤3 格方块，向上挖掘...")
+            dig_frames = (
+                [{"use_item": True, "sc": 1, "selected_slot": 1, "mx": 0, "my": -5, "jump": True}] * 15 +
+                [{"use_item": True, "sc": 1, "selected_slot": 1, "mx": 0, "my": -5}] * 15
+            )
+            def _dig_up_worker():
+                import time as _time
+                try:
+                    cleared = False
+                    for _ in range(10):
+                        controller.replay_skill(dig_frames)
+                        _time.sleep(len(dig_frames) / 60.0)
+                        s = perception.detect(frame=None)
+                        if s and _overhead_clear(s):
+                            cleared = True
+                            break
+                    if cleared:
+                        frames = _load_skill_frames(f"big_pillar_jump_{dir_name}")
+                        if frames:
+                            print(f"[卡住] 挖穿，触发 big_pillar_jump_{dir_name}")
+                            controller.replay_skill(frames)
+                    else:
+                        print(f"[卡住] 挖掘失败，放弃")
+                finally:
+                    if stuck_flag is not None:
+                        stuck_flag[0] = False
+            _threading.Thread(target=_dig_up_worker, daemon=True).start()
         return True
     return False
 

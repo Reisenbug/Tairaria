@@ -182,6 +182,21 @@ def _scan_terrain(tw: TileWindow, player: Player, movement: MovementInfo) -> Ter
     return TerrainScan(terrain_type=TerrainType.FLAT, distance_tiles=_SCAN_COLUMNS, depth_or_height=0)
 
 
+def scan_surface(tw: TileWindow, center_x: int, half_width: int = 20) -> list[tuple[int, int | None]]:
+    """Return [(world_x, surface_y), ...] for each column in [center_x-half_width, center_x+half_width].
+    surface_y is the world_y of the topmost solid tile in that column, or None if not found."""
+    result = []
+    for wx in range(center_x - half_width, center_x + half_width + 1):
+        surface_y = None
+        for wy in range(tw.origin[1], tw.origin[1] + tw.height):
+            t = tw.tile_at(wx, wy)
+            if t is not None and t.solid:
+                surface_y = wy
+                break
+        result.append((wx, surface_y))
+    return result
+
+
 class TerraBlindClient:
     def __init__(self, url: str = _DEFAULT_URL, timeout: float = _TIMEOUT_SEC) -> None:
         self._url = url
