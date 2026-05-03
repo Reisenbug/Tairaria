@@ -68,4 +68,4 @@ while True:
 
     print("\033[H\033[2J", end="")
     print("\n".join(lines), flush=True)
-    time.sleep(0.1)
+    time.sleep(0.05)
