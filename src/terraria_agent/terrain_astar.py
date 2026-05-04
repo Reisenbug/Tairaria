@@ -97,7 +97,7 @@ def _build_edge(tw: TileWindow, skyline: dict[int, int], movement: MovementInfo,
     if not has_gap and dy > peak:
         return NavEdge("pillar", dx, dy, _edge_cost("pillar", dx, dy, in_water))
 
-    if has_gap and dy <= peak:
+    if has_gap and 0 < dy <= peak:
         return NavEdge("bridge", dx, dy, _edge_cost("bridge", dx, dy, in_water))
 
     if has_gap and dy > peak:
