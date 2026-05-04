@@ -11,7 +11,7 @@ from terraria_agent.cerebellum.terra_blind_client import (
 )
 
 _LIVING_WOOD = {191, 192}  # Living Wood, Leaf Block
-_GOAL_RANGE = 60
+_GOAL_RANGE = 40
 _WALK_COST = 1
 _JUMP_COST = 1
 _SKILL_COST = 3
@@ -23,6 +23,7 @@ class NavEdge:
     dx: int
     dy: int
     cost: float
+    reason: str = ""
 
 
 @dataclass(order=True)
@@ -72,30 +73,17 @@ def _edge_cost(action: str, dx: int, dy: int, in_water: bool) -> float:
     return c * (2 if in_water else 1)
 
 
-def _walk_clear(tw: TileWindow, src_wx: int, src_wy: int, dst_wx: int, dst_wy: int) -> bool:
-    sign = 1 if dst_wx > src_wx else -1
-    adx = abs(dst_wx - src_wx)
-    for i in range(1, adx + 1):
-        cx = src_wx + sign * i
-        cy = src_wy + round((dst_wy - src_wy) * i / adx)
-        for dy in range(1, 4):
-            t = tw.tile_at(cx, cy - dy)
-            if t is not None and t.solid and not t.platform:
-                return False
-    return True
-
-
 def _jump_clear(tw: TileWindow, src_wx: int, src_wy: int, dst_wx: int,
                 envelope: list[int], sign: int) -> bool:
     adx = abs(dst_wx - src_wx)
-    peak_i = min(range(len(envelope)), key=lambda i: envelope[i])
-    peak_arc_y = src_wy + envelope[peak_i]
-    peak_cx = src_wx + sign * peak_i
-    for col_off in range(2):
-        for dy in range(1, 8):
-            t = tw.tile_at(peak_cx + col_off, peak_arc_y - dy)
-            if t is not None and t.solid and not t.platform:
-                return False
+    for i in range(adx + 1):
+        arc_y = src_wy + envelope[i]
+        cx = src_wx + sign * i
+        for col_off in range(2):
+            for dy in range(1, 4):
+                t = tw.tile_at(cx + col_off, arc_y - dy)
+                if t is not None and t.solid and not t.platform:
+                    return False
     return True
 
 
@@ -111,25 +99,25 @@ def _build_edge(tw: TileWindow, skyline: dict[int, int], movement: MovementInfo,
     envelope = _jump_envelope(movement, max_cols=adx + 1)
 
     if adx <= 1 and abs(dy) <= 1:
-        if not _walk_clear(tw, src_wx, src_wy, dst_wx, dst_wy):
-            return None
         return NavEdge("walk", dx, dy, _edge_cost("walk", dx, dy, in_water))
 
     if adx < len(envelope):
         reachable_dy = -envelope[adx]
         if 0 < dy <= reachable_dy:
             if not _jump_clear(tw, src_wx, src_wy, dst_wx, envelope, sign):
-                return NavEdge("bridge", dx, dy, _edge_cost("bridge", dx, dy, in_water))
+                return None
             return NavEdge("jump", dx, dy, _edge_cost("jump", dx, dy, in_water))
         if dy <= 0:
-            if not _walk_clear(tw, src_wx, src_wy, dst_wx, dst_wy):
-                return None
             return NavEdge("walk", dx, dy, _edge_cost("walk", adx, dy, in_water))
 
     if dy > peak:
-        return NavEdge("pillar_bridge", dx, dy, _edge_cost("pillar_bridge", dx, dy, in_water))
+        return NavEdge("pillar_bridge", dx, dy, _edge_cost("pillar_bridge", dx, dy, in_water),
+                       f"dy={dy} > peak={peak:.1f}")
+    if dy <= 0:
+        return None
 
-    return NavEdge("bridge", dx, dy, _edge_cost("bridge", dx, dy, in_water))
+    return NavEdge("bridge", dx, dy, _edge_cost("bridge", dx, dy, in_water),
+                   f"adx={adx} >= envelope={len(envelope)} dy={dy} peak={peak:.1f}")
 
 
 def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
@@ -149,13 +137,10 @@ def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
     goal_wx = pcx + sign * _GOAL_RANGE
     goal_wy = skyline.get(goal_wx)
     if goal_wy is None:
-        for offset in range(1, 10):
-            for d in (offset, -offset):
-                gw = goal_wx + d
-                if gw in skyline:
-                    goal_wx, goal_wy = gw, skyline[gw]
-                    break
-            if goal_wy is not None:
+        for r in range(_GOAL_RANGE, 0, -1):
+            gw = pcx + sign * r
+            if gw in skyline:
+                goal_wx, goal_wy = gw, skyline[gw]
                 break
     if goal_wy is None:
         return []
@@ -167,6 +152,7 @@ def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
     g: dict[int, float] = {start_wx: 0.0}
     prev: dict[int, tuple[int, NavEdge] | None] = {start_wx: None}
     heap = [_Node(float(abs(goal_wx - start_wx)), start_wx, start_wy)]
+    fail_reasons: dict[str, int] = {}
 
     while heap:
         node = heapq.heappop(heap)
@@ -184,11 +170,30 @@ def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
 
         cur_g = g.get(cx, math.inf)
         for nx in col_set:
-            if sign * (nx - cx) <= 0 or abs(nx - cx) > 20:
+            if sign * (nx - cx) <= 0 or abs(nx - cx) > 40:
                 continue
             ny = skyline[nx]
+            adx = abs(nx - cx)
+            dy = cy - ny
             edge = _build_edge(tw, skyline, movement, cx, cy, nx, ny)
             if edge is None:
+                envelope = _jump_envelope(movement, max_cols=adx + 1)
+                peak = _jump_peak(movement)
+                if adx <= 1 and abs(dy) <= 1:
+                    reason = f"walk_blocked adx={adx} dy={dy}"
+                elif adx < len(envelope):
+                    reachable_dy = -envelope[adx]
+                    if 0 < dy <= reachable_dy:
+                        reason = f"jump_overhead_blocked adx={adx} dy={dy}"
+                    elif -3 <= dy <= 0:
+                        reason = f"walk_blocked adx={adx} dy={dy}"
+                    else:
+                        reason = f"dy_out_of_range adx={adx} dy={dy} reachable={reachable_dy:.1f}"
+                elif dy <= 0:
+                    reason = f"downslope_too_far adx={adx} dy={dy}"
+                else:
+                    reason = f"unknown adx={adx} dy={dy}"
+                fail_reasons[reason] = fail_reasons.get(reason, 0) + 1
                 continue
             ng = cur_g + edge.cost
             if ng < g.get(nx, math.inf):
@@ -196,4 +201,7 @@ def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
                 prev[nx] = (cx, edge)
                 heapq.heappush(heap, _Node(ng + abs(goal_wx - nx), nx, ny))
 
+    reached = [wx for wx in g if wx != start_wx]
+    furthest = max(reached, key=lambda wx: sign * wx, default=start_wx)
+    print(f"[astar] no path ({start_wx},{start_wy})→({goal_wx},{goal_wy}) furthest={furthest} fail_reasons={fail_reasons}")
     return []

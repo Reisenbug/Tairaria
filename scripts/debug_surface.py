@@ -1,8 +1,18 @@
-import sys, os, time
+import sys, os, time, json, urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient, scan_standable, scan_skyline
 from terraria_agent.terrain_astar import astar
+
+_BASE = "http://127.0.0.1:17878"
+
+def _post(path, data):
+    try:
+        body = json.dumps(data).encode()
+        req = urllib.request.Request(_BASE + path, data=body, method="POST")
+        urllib.request.urlopen(req, timeout=1)
+    except Exception:
+        pass
 
 perception = TerraBlindClient()
 direction = "left"
@@ -46,14 +56,20 @@ while True:
     skyline = scan_skyline(tw)
 
     path = astar(state, sign)
+    if path is None:
+        print(f"[vis] living tree at ({pcx},{feet_y})")
+    elif not path:
+        goal_wx = pcx + sign * 45
+        print(f"[vis] no path at ({pcx},{feet_y}) in_skyline={pcx in skyline} skyline_y={skyline.get(pcx)} goal_wx={goal_wx} goal_in_skyline={goal_wx in skyline}")
     path_cols = {}
     if path:
         cur_x, cur_y = pcx, feet_y
         for wx, wy, edge in path:
-            x0, x1 = (cur_x, wx) if wx > cur_x else (wx, cur_x)
-            for col in range(x0, x1 + 1):
-                t = col / max(abs(wx - cur_x), 1)
-                interp_y = round(cur_y + (wy - cur_y) * t)
+            adx = max(abs(wx - cur_x), 1)
+            sx = 1 if wx > cur_x else -1
+            for i in range(adx + 1):
+                col = cur_x + sx * i
+                interp_y = round(cur_y + (wy - cur_y) * i / adx)
                 path_cols[col] = interp_y
             cur_x, cur_y = wx, wy
     path_nodes = {(wx, wy) for wx, wy, _ in path} if path else set()
@@ -95,14 +111,6 @@ while True:
         rows.append(f"{wy:4d} {row}")
 
     if path:
-        goal_wx, goal_wy, _ = path[-1]
-        print(f"\n[地图] pos=({pcx},{feet_y}) dir={direction} goal=({goal_wx},{goal_wy}) steps={len(path)}")
-        for pwx, pwy, pedge in path:
-            print(f"  ({pwx},{pwy}) {pedge.action} dx={pedge.dx} dy={pedge.dy} cost={pedge.cost:.1f}")
-    else:
-        print(f"\n[地图] pos=({pcx},{feet_y}) dir={direction} no path")
-    print("       (@=玩家, *=waypoint, P=pillar, B=bridge, ^=skyline, s=站立点)")
-    for row in rows:
-        print(row)
+        _post("/path_vis", [[pcx, feet_y]] + [[wx, wy] for wx, wy, _ in path])
 
     time.sleep(2.0)
