@@ -182,19 +182,41 @@ def _scan_terrain(tw: TileWindow, player: Player, movement: MovementInfo) -> Ter
     return TerrainScan(terrain_type=TerrainType.FLAT, distance_tiles=_SCAN_COLUMNS, depth_or_height=0)
 
 
-def scan_surface(tw: TileWindow) -> dict[int, int]:
-    """Return {world_x: surface_y} for every column in tile_window.
-    surface_y is the world_y of the topmost solid tile. Columns with no solid tile are omitted."""
-    result = {}
+def _rect_clear(tw: TileWindow, left_x: int, top_y: int) -> bool:
+    for dx in range(2):
+        for dy in range(3):
+            t = tw.tile_at(left_x + dx, top_y + dy)
+            if t is not None and t.solid:
+                return False
+    return True
+
+
+def scan_standable(tw: TileWindow) -> set[tuple[int, int]]:
+    """Return set of (wx, wy) standable tiles: solid tile with at least one valid 2x3 air rect above."""
+    result = set()
     for rx in range(tw.width):
         wx = tw.origin[0] + rx
         for ry in range(tw.height):
             wy = tw.origin[1] + ry
             t = tw.tile_at(wx, wy)
-            if t is not None and t.solid:
-                result[wx] = wy
-                break
+            if t is None or not t.solid:
+                continue
+            if _rect_clear(tw, wx - 1, wy - 3) or _rect_clear(tw, wx, wy - 3):
+                result.add((wx, wy))
     return result
+
+
+def scan_skyline(tw: TileWindow) -> dict[int, int]:
+    """Return {wx: wy} — topmost standable tile per column."""
+    result: dict[int, int] = {}
+    for wx, wy in scan_standable(tw):
+        if wx not in result or wy < result[wx]:
+            result[wx] = wy
+    return result
+
+
+def scan_surface(tw: TileWindow) -> dict[int, int]:
+    return scan_skyline(tw)
 
 
 class TerraBlindClient:
