@@ -5,7 +5,7 @@ from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient
 from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.terrain_astar import astar
 from terraria_agent.agent import _load_skill_frames, _mirror_frame
-from terraria_agent.cerebellum.terra_blind_client import _jump_peak_tiles
+from terraria_agent.cerebellum.terra_blind_client import _jump_peak_tiles, scan_skyline
 
 perception = TerraBlindClient()
 controller = ModController()
@@ -17,6 +17,12 @@ nav_state = "idle"
 target_wx = None
 target_wy = None
 current_action = None
+last_sample_t = time.time()
+last_sample_pcx = None
+stall_count = 0
+
+_STALL_SAMPLE_SEC = 1.0
+_STALL_LIMIT = 3
 
 while True:
     state = perception.detect(frame=None)
@@ -33,6 +39,19 @@ while True:
     pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
     feet_y = int((p.pos[1] + p.height) / 16.0)
 
+    now = time.time()
+    if now - last_sample_t >= _STALL_SAMPLE_SEC:
+        if nav_state != "idle" and last_sample_pcx == pcx:
+            stall_count += 1
+            if stall_count >= _STALL_LIMIT:
+                print(f"[astar] stall at ({pcx},{feet_y}), reset → idle")
+                nav_state = "idle"
+                stall_count = 0
+        else:
+            stall_count = 0
+        last_sample_pcx = pcx
+        last_sample_t = now
+
     if nav_state == "idle":
         path = astar(state, sign)
         if path is None:
@@ -47,7 +66,11 @@ while True:
         wx, wy, edge = path[0]
         target_wx, target_wy = wx, wy
         current_action = edge.action
-        print(f"[astar] next=({wx},{wy}) action={edge.action} dx={edge.dx} dy={edge.dy} cost={edge.cost:.1f}")
+        stall_count = 0
+        print(f"[astar] pos=({pcx},{feet_y}) full path:")
+        for pwx, pwy, pedge in path:
+            print(f"  ({pwx},{pwy}) {pedge.action} dx={pedge.dx} dy={pedge.dy} cost={pedge.cost:.1f}")
+        print(f"[astar] executing → ({wx},{wy}) {edge.action}")
 
         if current_action == "walk":
             nav_state = "walk"
@@ -59,8 +82,8 @@ while True:
             nav_state = "bridge"
 
     elif nav_state == "walk":
-        dx = abs(target_wx - pcx)
-        if dx <= 1:
+        dx = (target_wx - pcx) * sign
+        if dx <= 0:
             print(f"[astar] walk arrived ({pcx},{feet_y})")
             nav_state = "idle"
         else:
@@ -75,7 +98,6 @@ while True:
     elif nav_state == "pillar":
         jump_peak = _jump_peak_tiles(state.movement)
         rise = feet_y - target_wy
-        print(f"[astar] pillar rise={rise:.1f} peak={jump_peak:.1f}")
         if rise <= jump_peak:
             nav_state = "bridge" if current_action == "pillar_bridge" else "jump"
             print(f"[astar] pillar done → {nav_state}")
@@ -88,12 +110,13 @@ while True:
 
     elif nav_state == "bridge":
         dx = (target_wx - pcx) * sign
-        print(f"[astar] bridge dx={dx}")
         if dx <= 3:
             nav_state = "jump"
             print("[astar] bridge done → jump")
         else:
-            frames = _load_skill_frames(f"bridge_{direction}_2")
+            frames = _load_skill_frames("bridge_right_2")
+            if direction == "left":
+                frames = [_mirror_frame(f) for f in frames]
             controller.replay_skill(frames)
             time.sleep(len(frames) / 60.0)
 
@@ -103,5 +126,3 @@ while True:
         controller.replay_skill(jump_frames)
         time.sleep(45 / 60.0)
         nav_state = "idle"
-
-    time.sleep(0.2)

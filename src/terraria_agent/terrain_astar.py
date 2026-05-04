@@ -72,6 +72,33 @@ def _edge_cost(action: str, dx: int, dy: int, in_water: bool) -> float:
     return c * (2 if in_water else 1)
 
 
+def _walk_clear(tw: TileWindow, src_wx: int, src_wy: int, dst_wx: int, dst_wy: int) -> bool:
+    sign = 1 if dst_wx > src_wx else -1
+    adx = abs(dst_wx - src_wx)
+    for i in range(1, adx + 1):
+        cx = src_wx + sign * i
+        cy = src_wy + round((dst_wy - src_wy) * i / adx)
+        for dy in range(1, 4):
+            t = tw.tile_at(cx, cy - dy)
+            if t is not None and t.solid and not t.platform:
+                return False
+    return True
+
+
+def _jump_clear(tw: TileWindow, src_wx: int, src_wy: int, dst_wx: int,
+                envelope: list[int], sign: int) -> bool:
+    adx = abs(dst_wx - src_wx)
+    peak_i = min(range(len(envelope)), key=lambda i: envelope[i])
+    peak_arc_y = src_wy + envelope[peak_i]
+    peak_cx = src_wx + sign * peak_i
+    for col_off in range(2):
+        for dy in range(1, 8):
+            t = tw.tile_at(peak_cx + col_off, peak_arc_y - dy)
+            if t is not None and t.solid and not t.platform:
+                return False
+    return True
+
+
 def _build_edge(tw: TileWindow, skyline: dict[int, int], movement: MovementInfo,
                 src_wx: int, src_wy: int, dst_wx: int, dst_wy: int) -> Optional[NavEdge]:
     dx = dst_wx - src_wx
@@ -79,31 +106,30 @@ def _build_edge(tw: TileWindow, skyline: dict[int, int], movement: MovementInfo,
     adx = abs(dx)
     sign = 1 if dx > 0 else -1
 
-    has_gap = any(skyline.get(src_wx + sign * i) is None for i in range(1, adx))
     in_water = _is_water(tw, src_wx, src_wy - 1)
     peak = _jump_peak(movement)
     envelope = _jump_envelope(movement, max_cols=adx + 1)
 
-    if adx <= 1 and abs(dy) <= 1 and not has_gap:
+    if adx <= 1 and abs(dy) <= 1:
+        if not _walk_clear(tw, src_wx, src_wy, dst_wx, dst_wy):
+            return None
         return NavEdge("walk", dx, dy, _edge_cost("walk", dx, dy, in_water))
 
     if adx < len(envelope):
         reachable_dy = -envelope[adx]
-        if not has_gap and 0 < dy <= reachable_dy:
+        if 0 < dy <= reachable_dy:
+            if not _jump_clear(tw, src_wx, src_wy, dst_wx, envelope, sign):
+                return NavEdge("bridge", dx, dy, _edge_cost("bridge", dx, dy, in_water))
             return NavEdge("jump", dx, dy, _edge_cost("jump", dx, dy, in_water))
-        if not has_gap and dy <= 0:
+        if dy <= 0:
+            if not _walk_clear(tw, src_wx, src_wy, dst_wx, dst_wy):
+                return None
             return NavEdge("walk", dx, dy, _edge_cost("walk", adx, dy, in_water))
 
-    if not has_gap and dy > peak:
-        return NavEdge("pillar", dx, dy, _edge_cost("pillar", dx, dy, in_water))
-
-    if has_gap and 0 < dy <= peak:
-        return NavEdge("bridge", dx, dy, _edge_cost("bridge", dx, dy, in_water))
-
-    if has_gap and dy > peak:
+    if dy > peak:
         return NavEdge("pillar_bridge", dx, dy, _edge_cost("pillar_bridge", dx, dy, in_water))
 
-    return None
+    return NavEdge("bridge", dx, dy, _edge_cost("bridge", dx, dy, in_water))
 
 
 def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
