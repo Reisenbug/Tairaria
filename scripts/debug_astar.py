@@ -1,11 +1,11 @@
 import sys, os, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient
+from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient, scan_skyline
 from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.terrain_astar import astar
 from terraria_agent.agent import _load_skill_frames, _mirror_frame
-from terraria_agent.cerebellum.terra_blind_client import _jump_peak_tiles, scan_skyline
+from terraria_agent.cerebellum.terra_blind_client import _jump_peak_tiles
 
 perception = TerraBlindClient()
 controller = ModController()
@@ -20,9 +20,12 @@ current_action = None
 last_sample_t = time.time()
 last_sample_pcx = None
 stall_count = 0
+full_path = []
+segment_index = 0
 
 _STALL_SAMPLE_SEC = 1.0
 _STALL_LIMIT = 3
+_PAUSE_SEC = 2.0
 
 while True:
     state = perception.detect(frame=None)
@@ -44,7 +47,13 @@ while True:
         if nav_state != "idle" and last_sample_pcx == pcx:
             stall_count += 1
             if stall_count >= _STALL_LIMIT:
-                print(f"[astar] stall at ({pcx},{feet_y}), reset → idle")
+                skyline = scan_skyline(tw)
+                print(f"[stall] pos=({pcx},{feet_y}) target=({target_wx},{target_wy}) state={nav_state} action={current_action}")
+                print(f"[stall] in_skyline={pcx in skyline} skyline_y={skyline.get(pcx)}")
+                print(f"[stall] vx={p.velocity[0]:.2f} vy={p.velocity[1]:.2f}")
+                remaining = full_path[segment_index:]
+                print(f"[stall] remaining path: {[(wx,wy,e.action) for wx,wy,e in remaining]}")
+                controller._post_control({})
                 nav_state = "idle"
                 stall_count = 0
         else:
@@ -63,14 +72,16 @@ while True:
             time.sleep(0.5)
             continue
 
+        full_path = path
+        segment_index = 0
         wx, wy, edge = path[0]
         target_wx, target_wy = wx, wy
         current_action = edge.action
         stall_count = 0
-        print(f"[astar] pos=({pcx},{feet_y}) full path:")
+        print(f"[astar] pos=({pcx},{feet_y}) path:")
         for pwx, pwy, pedge in path:
-            print(f"  ({pwx},{pwy}) {pedge.action} dx={pedge.dx} dy={pedge.dy} cost={pedge.cost:.1f}")
-        print(f"[astar] executing → ({wx},{wy}) {edge.action}")
+            print(f"  ({pwx},{pwy}) {pedge.action} dx={pedge.dx} dy={pedge.dy}")
+        print(f"[astar] → ({wx},{wy}) {edge.action}")
 
         if current_action == "walk":
             nav_state = "walk"
@@ -84,8 +95,25 @@ while True:
     elif nav_state == "walk":
         dx = (target_wx - pcx) * sign
         if dx <= 0:
-            print(f"[astar] walk arrived ({pcx},{feet_y})")
-            nav_state = "idle"
+            segment_index += 1
+            if segment_index >= len(full_path):
+                print(f"[astar] path done at ({pcx},{feet_y}), pausing {_PAUSE_SEC}s")
+                controller._post_control({})
+                time.sleep(_PAUSE_SEC)
+                nav_state = "idle"
+            else:
+                wx, wy, edge = full_path[segment_index]
+                target_wx, target_wy = wx, wy
+                current_action = edge.action
+                print(f"[astar] → ({wx},{wy}) {edge.action}")
+                if current_action == "walk":
+                    nav_state = "walk"
+                elif current_action == "jump":
+                    nav_state = "jump"
+                elif current_action in ("pillar", "pillar_bridge"):
+                    nav_state = "stop"
+                elif current_action == "bridge":
+                    nav_state = "bridge"
         else:
             controller._post_control({direction: True})
 
@@ -121,8 +149,25 @@ while True:
             time.sleep(len(frames) / 60.0)
 
     elif nav_state == "jump":
-        print(f"[astar] jump to ({target_wx},{target_wy})")
         jump_frames = [{"jump": True, direction: True}] * 15 + [{direction: True}] * 30
         controller.replay_skill(jump_frames)
         time.sleep(45 / 60.0)
-        nav_state = "idle"
+        segment_index += 1
+        if segment_index >= len(full_path):
+            print(f"[astar] path done at ({pcx},{feet_y}), pausing {_PAUSE_SEC}s")
+            controller._post_control({})
+            time.sleep(_PAUSE_SEC)
+            nav_state = "idle"
+        else:
+            wx, wy, edge = full_path[segment_index]
+            target_wx, target_wy = wx, wy
+            current_action = edge.action
+            print(f"[astar] → ({wx},{wy}) {edge.action}")
+            if current_action == "walk":
+                nav_state = "walk"
+            elif current_action == "jump":
+                nav_state = "jump"
+            elif current_action in ("pillar", "pillar_bridge"):
+                nav_state = "stop"
+            elif current_action == "bridge":
+                nav_state = "bridge"
