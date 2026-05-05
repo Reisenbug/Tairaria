@@ -70,7 +70,7 @@ while True:
         if nav_state != "idle" and last_sample_pcx == pcx:
             stall_count += 1
             if stall_count >= _STALL_LIMIT:
-                print(f"[stall] pos=({pcx},{feet_y}) overhead={overhead} blocked_fwd={blocked_fwd} in_pit={in_pit}")
+                print(f"[stall] pos=({pcx},{feet_y}) in_pit={in_pit}")
                 controller._post_control({})
                 nav_state = "idle"
                 stall_count = 0
@@ -82,16 +82,9 @@ while True:
     head_y = int(p.pos[1] / 16.0)
     skyline = scan_skyline(tw)
     sky_y = skyline.get(pcx)
-    overhead = any(
-        tw.tile_at(pcx + c, head_y - dy) is not None and tw.tile_at(pcx + c, head_y - dy).solid
-        for c in range(2) for dy in range(1, 8)
-    )
-    blocked_fwd = any(
-        tw.tile_at(pcx + sign, feet_y - dy) is not None and tw.tile_at(pcx + sign, feet_y - dy).solid
-        for dy in range(1, 4)
-    )
     in_pit = sky_y is not None and feet_y > sky_y + 4
-    if overhead or in_pit or blocked_fwd:
+    if in_pit:
+        print(f"[in_pit] feet_y={feet_y} sky_y={sky_y}")
         controller._post_control({"left" if direction == "right" else "right": True})
         nav_state = "idle"
         continue
@@ -112,7 +105,37 @@ while True:
         #         import sys; sys.exit(0)
 
         _post("/path_vis", [[pcx, feet_y]] + [[wx, wy] for wx, wy, _ in path])
+        pillar_tiles, bridge_tiles = [], []
+        labels = []
+        _ACTION_COLOR = {
+            "walk":         (100, 220, 255),
+            "jump":         (100, 255, 100),
+            "bridge":       (255, 180,   0),
+            "pillar":       (255,  80,  80),
+            "pillar_bridge":(255,  80, 255),
+        }
+        cx0, cy0 = pcx, feet_y
+        for wx, wy, edge in path:
+            if edge.action in ("pillar", "pillar_bridge"):
+                rise = cy0 - wy
+                for i in range(rise):
+                    pillar_tiles.append([cx0, cy0 - 1 - i])
+            if edge.action in ("bridge", "pillar_bridge"):
+                x0, x1 = min(cx0, wx), max(cx0, wx)
+                for bx in range(x0, x1 + 1):
+                    bridge_tiles.append([bx, wy - 1])
+            r, g, b = _ACTION_COLOR.get(edge.action, (255, 255, 255))
+            reason_str = f" {edge.reason}" if edge.reason else ""
+            labels.append({"wx": wx, "wy": wy,
+                           "text": f"{edge.action} c={edge.cost:.0f} dx={edge.dx} dy={edge.dy}{reason_str}",
+                           "r": r, "g": g, "b": b})
+            cx0, cy0 = wx, wy
+        _post("/path_vis_blocks", {"pillar": pillar_tiles, "bridge": bridge_tiles})
+        _post("/debug_labels", labels)
         print(f"[plan] pos=({pcx},{feet_y}) → path[0]=({path[0][0]},{path[0][1]}) {path[0][2].action}")
+        for wx, wy, edge in path:
+            print(f"  ({wx},{wy}) {edge.action} dx={edge.dx} dy={edge.dy} cost={edge.cost:.1f}" +
+                  (f" [{edge.reason}]" if edge.reason else ""))
         target_wx, target_wy, current_action, nav_state = _next_segment(path, 0)
         walk_start_y = feet_y if nav_state == "walk" else None
         stall_count = 0
@@ -134,16 +157,30 @@ while True:
             controller._post_control({})
 
     elif nav_state == "pillar":
-        jump_peak = _jump_peak_tiles(state.movement)
-        rise = feet_y - target_wy
-        if rise <= jump_peak:
-            nav_state = "bridge" if current_action == "pillar_bridge" else "jump"
-        else:
-            frames = _load_skill_frames("pillar_jump_2_height")
-            if direction == "left":
+        overhead = any(
+            tw.tile_at(pcx + c, head_y - dy) is not None and tw.tile_at(pcx + c, head_y - dy).solid
+            and not tw.tile_at(pcx + c, head_y - dy).platform
+            for c in range(2) for dy in range(1, 8)
+        )
+        if overhead:
+            print(f"[pillar] overhead blocked, bridging back")
+            back = "left" if direction == "right" else "right"
+            frames = _load_skill_frames("bridge_right_2")
+            if back == "left":
                 frames = [_mirror_frame(f) for f in frames]
             controller.replay_skill(frames)
             time.sleep(len(frames) / 60.0)
+        else:
+            jump_peak = _jump_peak_tiles(state.movement)
+            rise = feet_y - target_wy
+            if rise <= jump_peak:
+                nav_state = "bridge" if current_action == "pillar_bridge" else "jump"
+            else:
+                frames = _load_skill_frames("pillar_jump_2_height")
+                if direction == "left":
+                    frames = [_mirror_frame(f) for f in frames]
+                controller.replay_skill(frames)
+                time.sleep(len(frames) / 60.0)
 
     elif nav_state == "bridge":
         dx = (target_wx - pcx) * sign
