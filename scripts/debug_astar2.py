@@ -98,14 +98,18 @@ def astar2(state, sign):
                 h = abs(goal_wx - nx) + abs(goal_wy - ny)
                 heapq.heappush(heap, _Node(ng + h, nx, ny))
 
-    explored = set(g.keys())
-    tiles = []
-    for wx, wy in explored:
-        tiles.append({"wx": wx, "wy": wy, "r": 180, "g": 60, "b": 60})
-    tiles.append({"wx": goal_wx, "wy": goal_wy, "r": 255, "g": 200, "b": 0})
-    _post("/path_vis_tiles", tiles)
-    print(f"[astar2] no path {start}→{goal} explored={len(explored)}")
-    return []
+    candidates = [(wx, wy) for (wx, wy) in g if sign * (wx - pcx) > 0]
+    if not candidates:
+        candidates = list(g.keys())
+    fallback = max(candidates, key=lambda p: sign * p[0])
+    path = []
+    pos = fallback
+    while prev[pos] is not None:
+        path.append(pos)
+        pos = prev[pos]
+    path.reverse()
+    print(f"[astar2] fallback {start}→{fallback} (goal was {goal})")
+    return path
 
 
 while True:
