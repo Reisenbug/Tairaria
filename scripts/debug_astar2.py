@@ -51,6 +51,12 @@ def astar2(state, sign):
             goal = (gx, skyline[gx] - 1)
             break
     if goal is None:
+        for r in range(1, _GOAL_RANGE + 1):
+            gx = pcx - sign * r
+            if gx in skyline:
+                goal = (gx, skyline[gx] - 1)
+                break
+    if goal is None:
         print(f"[astar2] no goal")
         return []
 
