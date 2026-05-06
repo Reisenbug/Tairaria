@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import heapq
+import json
 import math
+import urllib.request
 from dataclasses import dataclass, field
 
 from terraria_agent.cerebellum.terra_blind_client import scan_skyline, _jump_envelope
@@ -10,6 +12,19 @@ from terraria_agent.models.game_state import MovementInfo
 _GROUND_MOVEMENT = MovementInfo()
 _GOAL_RANGE = 40
 _MAX_BRIDGE = 15
+_BASE = "http://127.0.0.1:17878"
+
+
+def fetch_jump_envelope(max_cols: int = _MAX_BRIDGE + 1) -> list[int]:
+    try:
+        resp = urllib.request.urlopen(_BASE + "/jump_envelope", timeout=1)
+        data = json.loads(resp.read())
+        env = data["envelope"]
+        if len(env) < max_cols:
+            env += [env[-1]] * (max_cols - len(env))
+        return env[:max_cols]
+    except Exception:
+        return _jump_envelope(_GROUND_MOVEMENT, max_cols=max_cols)
 
 
 @dataclass(order=True)
@@ -66,6 +81,7 @@ def astar2(state, sign):
     pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
     feet_y = int((p.pos[1] + p.height) / 16.0)
 
+    envelope = fetch_jump_envelope(max_cols=_MAX_BRIDGE + 1)
     start = (pcx, feet_y)
 
     skyline = scan_skyline(tw)
@@ -138,7 +154,6 @@ def astar2(state, sign):
 
         if (_standable(tw, cx, cy) or (cx, cy) in bridge_nodes) and \
                 not _solid(tw, cx, cy - 1) and not _solid(tw, cx, cy - 2):
-            envelope = _jump_envelope(_GROUND_MOVEMENT, max_cols=_MAX_BRIDGE + 1)
             for js in (1, -1):
                 for col in range(1, len(envelope)):
                     nx = cx + js * col

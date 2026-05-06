@@ -1,10 +1,10 @@
 import sys, os, time, json, urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient, _jump_peak_tiles, _jump_envelope
+from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient, _jump_peak_tiles
 from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.agent import _mirror_frame, _load_skill_frames
-from terraria_agent.terrain_astar2 import astar2, _standable, _GROUND_MOVEMENT
+from terraria_agent.terrain_astar2 import astar2, _standable, fetch_jump_envelope
 
 _BASE = "http://127.0.0.1:17878"
 
@@ -38,7 +38,7 @@ def _vis_path(path, pcx, feet_y, total_cost, sign):
         elif action == "jump":
             adx = abs(wx - prev_wx)
             js = 1 if wx > prev_wx else -1
-            envelope = _jump_envelope(_GROUND_MOVEMENT, max_cols=adx + 1)
+            envelope = fetch_jump_envelope(max_cols=adx + 1)
             for i in range(adx + 1):
                 bx = prev_wx + js * i
                 by = prev_y + envelope[i]

@@ -1,11 +1,10 @@
 import sys, os, time, json, urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient, _jump_envelope
-from terraria_agent.models.game_state import MovementInfo
+from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient
 from terraria_agent.terrain_astar2 import (
     astar2, _solid, _standable, _dist_to_ground, _step_cost,
-    _GROUND_MOVEMENT, _GOAL_RANGE, _MAX_BRIDGE,
+    fetch_jump_envelope, _GOAL_RANGE, _MAX_BRIDGE,
 )
 
 perception = TerraBlindClient()
@@ -75,7 +74,7 @@ while True:
             elif action == "jump":
                 adx = abs(wx - prev_wx)
                 js = 1 if wx > prev_wx else -1
-                envelope = _jump_envelope(_GROUND_MOVEMENT, max_cols=adx + 1)
+                envelope = fetch_jump_envelope(max_cols=adx + 1)
                 for i in range(adx + 1):
                     bx = prev_wx + js * i
                     by = prev_y + envelope[i]
