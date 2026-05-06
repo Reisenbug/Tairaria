@@ -136,7 +136,8 @@ def astar2(state, sign):
                 h = abs(goal_wx - nx) + abs(goal_wy - ny)
                 heapq.heappush(heap, _Node(ng + h, nx, ny))
 
-        if _standable(tw, cx, cy) or (cx, cy) in bridge_nodes:
+        if (_standable(tw, cx, cy) or (cx, cy) in bridge_nodes) and \
+                not _solid(tw, cx, cy - 1) and not _solid(tw, cx, cy - 2):
             envelope = _jump_envelope(_GROUND_MOVEMENT, max_cols=_MAX_BRIDGE + 1)
             for js in (1, -1):
                 for col in range(1, len(envelope)):
@@ -145,7 +146,7 @@ def astar2(state, sign):
                         break
                     arc_dy = envelope[col]
                     blocked = False
-                    for i in range(col):
+                    for i in range(1, col):
                         arc_y = cy + envelope[i]
                         bx = cx + js * i
                         if _solid(tw, bx, arc_y) or _solid(tw, bx, arc_y - 1):

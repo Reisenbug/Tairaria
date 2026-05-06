@@ -214,6 +214,10 @@ while True:
     elif nav_state == "move":
         dx = (target_wx - pcx) * sign
         if dx <= ARRIVE_X:
+            if abs(feet_y - target_wy) > 5:
+                do_replan(state, f"move arrived but y off: got={feet_y} expected={target_wy}")
+                time.sleep(0.1)
+                continue
             path_idx += 1
             nav_state = "idle"
         else:
@@ -250,6 +254,11 @@ while True:
     elif nav_state == "jump":
         controller.replay_skill(jump_frames)
         time.sleep(len(jump_frames) / 60.0)
+        pcx, feet_y = _player_tile(perception.detect(frame=None).player)
+        if abs(pcx - target_wx) > 4 or abs(feet_y - target_wy) > 5:
+            do_replan(state, f"jump miss: got=({pcx},{feet_y}) expected=({target_wx},{target_wy})")
+            time.sleep(0.1)
+            continue
         path_idx += 1
         nav_state = "idle"
 
