@@ -92,10 +92,9 @@ perception = TerraBlindClient()
 controller = ModController()
 
 pillar_frames = _load_skill_frames("pillar_jump_2_height")
-bridge_frames = _load_skill_frames("bridge_right_2")
 if direction == "left":
     pillar_frames = [_mirror_frame(f) for f in pillar_frames]
-    bridge_frames = [_mirror_frame(f) for f in bridge_frames]
+bridge_frames = _load_skill_frames(f"bridge_{direction}_2")
 jump_frames = ([{"jump": True, direction: True}] * 15 +
                [{direction: True}] * 30)
 
