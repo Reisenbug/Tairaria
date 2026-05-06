@@ -94,6 +94,12 @@ def _dist_to_ground(tw, wx, wy, max_depth=20):
     return max_depth
 
 
+def _bridge_ground_penalty(dtg):
+    if dtg >= 8:
+        return 0
+    return (8 - dtg) * 2
+
+
 def _step_cost(dy):
     if dy > 0:
         return dy * 0.5
@@ -115,18 +121,11 @@ def astar2(state, sign):
     start = (pcx, feet_y)
 
     skyline = scan_skyline(tw)
-    goal = None
-    for r in range(_GOAL_RANGE, 0, -1):
-        gx = pcx + sign * r
-        if gx in skyline:
-            goal = (gx, skyline[gx] - 1)
-            break
-    if goal is None:
-        for r in range(1, _GOAL_RANGE + 1):
-            gx = pcx - sign * r
-            if gx in skyline:
-                goal = (gx, skyline[gx] - 1)
-                break
+    target_x = pcx + sign * _GOAL_RANGE
+    candidates = [(gx, skyline[gx] - 1) for gx in skyline if sign * (gx - pcx) > 0]
+    if not candidates:
+        candidates = [(gx, skyline[gx] - 1) for gx in skyline]
+    goal = min(candidates, key=lambda p: abs(p[0] - target_x)) if candidates else None
     if goal is None:
         print(f"[astar2] no goal")
         return []
@@ -180,7 +179,7 @@ def astar2(state, sign):
                 g[npos] = ng
                 if dy == 1:
                     action = "fall"
-                elif dx != 0 and dtg > 0:
+                elif dx != 0 and dtg >= 2:
                     action = "bridge"
                     bridge_nodes.add(npos)
                 else:
@@ -208,7 +207,8 @@ def astar2(state, sign):
                         break
                     for ny in range(cy + arc_dy, min(cy + arc_dy + 4, y_max + 1)):
                         if _standable(tw, nx, ny):
-                            cost = col * 0.5 + _step_cost(ny - cy)
+                            launch_rise = max(0, feet_y - cy)
+                            cost = col * 0.5 + _step_cost(ny - cy) + launch_rise * 2
                             ng = cur_g + cost
                             npos = (nx, ny)
                             if ng < g.get(npos, math.inf):
@@ -218,6 +218,31 @@ def astar2(state, sign):
                                 h = abs(goal_wx - nx) + abs(goal_wy - ny)
                                 heapq.heappush(heap, _Node(ng + h, nx, ny))
                             break
+
+        if _standable(tw, cx, cy):
+            for js in (sign,):
+                min_dtg = 20
+                max_rise = 0
+                for col in range(1, _MAX_BRIDGE + 1):
+                    nx = cx + js * col
+                    if nx < x_min or nx > x_max:
+                        break
+                    if _solid(tw, nx, cy):
+                        break
+                    if _solid(tw, nx, cy - 1) or _solid(tw, nx, cy - 2):
+                        break
+                    min_dtg = min(min_dtg, _dist_to_ground(tw, nx, cy))
+                    if _standable(tw, nx, cy):
+                        shallow_penalty = _bridge_ground_penalty(min_dtg)
+                        launch_rise = max(0, feet_y - cy) * 3
+                        cost = 3 + col * 1.5 + shallow_penalty + launch_rise
+                        ng = cur_g + cost
+                        npos = (nx, cy)
+                        if ng < g.get(npos, math.inf):
+                            g[npos] = ng
+                            prev[npos] = ((cx, cy), "bridge")
+                            h = abs(goal_wx - nx) + abs(goal_wy - cy)
+                            heapq.heappush(heap, _Node(ng + h, nx, cy))
 
     candidates = [(wx, wy) for (wx, wy) in visited if sign * (wx - pcx) > 0 and _standable(tw, wx, wy)]
     if not candidates:
@@ -256,6 +281,10 @@ while True:
     result = astar2(state, sign)
     dt = time.time() - t0
     print(f"[time] astar2 {dt*1000:.0f}ms")
+    if result:
+        for wx, wy, action in result[0]:
+            if action == "bridge":
+                print(f"  [bridge] ({wx},{wy}) from_y={wy}")
 
     if not result:
         print(f"[vis] no path at ({pcx},{feet_y})")
