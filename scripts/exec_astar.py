@@ -82,7 +82,7 @@ def _vis_path(path, pcx, feet_y, total_cost, sign):
 direction = "left"
 sign = 1 if direction == "right" else -1
 
-ARRIVE_X = 2
+ARRIVE_X = 3
 DEVIATE_Y = 10
 STALL_LIMIT = 4
 REPLAN_INTERVAL = 20.0
@@ -92,9 +92,10 @@ perception = TerraBlindClient()
 controller = ModController()
 
 pillar_frames = _load_skill_frames("pillar_jump_2_height")
+bridge_frames = _load_skill_frames("bridge_right_2")
 if direction == "left":
     pillar_frames = [_mirror_frame(f) for f in pillar_frames]
-bridge_frames = _load_skill_frames(f"bridge_{direction}_2")
+    bridge_frames = [_mirror_frame(f) for f in bridge_frames]
 jump_frames = ([{"jump": True, direction: True}] * 15 +
                [{direction: True}] * 30)
 
@@ -235,6 +236,7 @@ while True:
         else:
             controller.replay_skill(pillar_frames)
             time.sleep(len(pillar_frames) / 60.0)
+            continue
 
     elif nav_state == "bridge":
         dx = (target_wx - pcx) * sign
@@ -244,7 +246,7 @@ while True:
             nav_state = "idle"
         else:
             controller.replay_skill(bridge_frames)
-            time.sleep(len(bridge_frames) / 60.0)
+            time.sleep(0.2)
 
     elif nav_state == "jump":
         controller.replay_skill(jump_frames)

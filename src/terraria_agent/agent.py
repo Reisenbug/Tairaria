@@ -177,8 +177,8 @@ def _load_skill_frames(name: str) -> list:
     import json
     path = _SKILL_DIR / f"{name}.json"
     mirror = False
-    if not path.exists() and name.endswith("_left"):
-        path = _SKILL_DIR / f"{name[:-5]}_right.json"
+    if not path.exists() and "left" in name:
+        path = _SKILL_DIR / f"{name.replace('left', 'right')}.json"
         mirror = True
     if not path.exists():
         return []
