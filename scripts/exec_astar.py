@@ -252,9 +252,19 @@ while True:
             time.sleep(0.2)
 
     elif nav_state == "jump":
-        controller.replay_skill(jump_frames)
-        time.sleep(len(jump_frames) / 60.0)
-        pcx, feet_y = _player_tile(perception.detect(frame=None).player)
+        target_px = target_wx * 16.0
+        dir_str = "right" if sign > 0 else "left"
+        _post("/jump", {"direction": dir_str, "target_x": target_px})
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            time.sleep(0.05)
+            js = perception.detect(frame=None)
+            jp = js.player
+            if jp.on_ground:
+                break
+        pcx, feet_y = _player_tile(jp)
+        print(f"[jump] landed at ({pcx},{feet_y}) expected ({target_wx},{target_wy})")
+        _post("/jump_stop", {})
         if abs(pcx - target_wx) > 4 or abs(feet_y - target_wy) > 5:
             do_replan(state, f"jump miss: got=({pcx},{feet_y}) expected=({target_wx},{target_wy})")
             time.sleep(0.1)

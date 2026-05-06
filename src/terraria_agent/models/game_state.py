@@ -105,6 +105,7 @@ class Player(BaseModel):
     width: float = 0.0
     height: float = 0.0
     velocity: tuple[float, float] = (0.0, 0.0)
+    on_ground: bool = False
     direction: str = "right"
     buffs: list[str] = []
     debuffs: list[str] = []

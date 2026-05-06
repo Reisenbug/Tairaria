@@ -317,6 +317,7 @@ class TerraBlindClient:
             width=float(p["width"]),
             height=float(p["height"]),
             velocity=(float(vel.get("x", 0.0)), float(vel.get("y", 0.0))),
+            on_ground=bool(p.get("on_ground", False)),
             direction=str(p.get("direction", "right")),
             buffs=[str(b.get("name", "")) for b in buffs_raw if isinstance(b, dict)],
             took_damage=damage.took_damage,
