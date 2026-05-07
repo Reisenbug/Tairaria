@@ -164,7 +164,7 @@ class Navigator:
             return {self._direction: True}
 
         elif self._state == "stop":
-            if abs(p.vel[0]) < 0.5:
+            if abs(p.velocity[0]) < 0.5:
                 self._state = "pillar"
             return {}
 

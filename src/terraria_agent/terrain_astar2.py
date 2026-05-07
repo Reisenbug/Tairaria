@@ -12,6 +12,7 @@ from terraria_agent.models.game_state import MovementInfo
 _GROUND_MOVEMENT = MovementInfo()
 _GOAL_RANGE = 40
 _MAX_BRIDGE = 15
+_MAX_JUMP_COLS = 8
 _BASE = "http://127.0.0.1:17878"
 
 
@@ -81,7 +82,7 @@ def astar2(state, sign):
     pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
     feet_y = int((p.pos[1] + p.height) / 16.0)
 
-    envelope = fetch_jump_envelope(max_cols=_MAX_BRIDGE + 1)
+    envelope = fetch_jump_envelope(max_cols=_MAX_JUMP_COLS + 1)
     start = (pcx, feet_y)
 
     skyline = scan_skyline(tw)
@@ -133,21 +134,22 @@ def astar2(state, sign):
                 continue
             if _solid(tw, nx, ny):
                 continue
-            cost = _step_cost(dy)
+            if dy == -1 and dx == 0:
+                continue
+            if dy == -1 and not _solid(tw, nx, ny + 1):
+                continue
             dtg = _dist_to_ground(tw, nx, ny) if dx != 0 else 0
-            if dx != 0:
-                cost += 2 + dtg
+            if dx != 0 and dtg >= 2:
+                continue
+            if dy == 1:
+                cost = 0.5
+            else:
+                cost = 1 + dtg
             ng = cur_g + cost
             npos = (nx, ny)
             if ng < g.get(npos, math.inf):
                 g[npos] = ng
-                if dy == 1:
-                    action = "fall"
-                elif dx != 0 and dtg >= 2:
-                    action = "bridge"
-                    bridge_nodes.add(npos)
-                else:
-                    action = "move"
+                action = "fall" if dy == 1 else "move"
                 prev[npos] = ((cx, cy), action)
                 h = abs(goal_wx - nx) + abs(goal_wy - ny)
                 heapq.heappush(heap, _Node(ng + h, nx, ny))
@@ -171,9 +173,10 @@ def astar2(state, sign):
                         break
                     for ny in range(cy + arc_dy, min(cy + arc_dy + 4, y_max + 1)):
                         if _standable(tw, nx, ny):
-                            launch_rise = max(0, feet_y - cy)
-                            cost = col * 0.5 + _step_cost(ny - cy) + launch_rise * 2
-                            ng = cur_g + cost
+                            rise = cy - ny
+                            rise_bonus = max(0, rise - 1) * 2
+                            cost = 4 + col * 1.0 - rise_bonus
+                            ng = cur_g + max(cost, 1.0)
                             npos = (nx, ny)
                             if ng < g.get(npos, math.inf):
                                 g[npos] = ng
@@ -197,8 +200,7 @@ def astar2(state, sign):
                     min_dtg = min(min_dtg, _dist_to_ground(tw, nx, cy))
                     if _standable(tw, nx, cy):
                         shallow_penalty = _bridge_ground_penalty(min_dtg)
-                        launch_rise = max(0, feet_y - cy) * 3
-                        cost = 3 + col * 1.5 + shallow_penalty + launch_rise
+                        cost = 4 + col * 2.0 + shallow_penalty
                         ng = cur_g + cost
                         npos = (nx, cy)
                         if ng < g.get(npos, math.inf):

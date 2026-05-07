@@ -13,17 +13,17 @@
       "use_item": true,
       "sc": 0,
       "slot": 2,
-      "mx": 1.2,
+      "mx": 0.8,
       "my": 1.7,
-      "repeat": 25
+      "repeat": 15
     },
     {
       "use_item": true,
       "sc": 0,
       "slot": 2,
-      "mx": 1.2,
+      "mx": 0.8,
       "my": 1.7,
-      "repeat": 25
+      "repeat": 10
     }
   ]
 }

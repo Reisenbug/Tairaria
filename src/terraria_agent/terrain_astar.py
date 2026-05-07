@@ -87,9 +87,10 @@ def _jump_clear(tw: TileWindow, src_wx: int, src_wy: int, dst_wx: int,
     return True
 
 
-def _has_floor_gap(tw: TileWindow, cx: int, nx: int, ny: int, sign: int) -> bool:
-    for x in range(cx, nx + sign, sign):
-        if not _is_standable_at(tw, x, ny):
+def _has_floor_gap(tw: TileWindow, cx: int, cy: int, nx: int, ny: int, sign: int) -> bool:
+    for x in range(cx + sign, nx, sign):
+        has_ground = any(_is_standable_at(tw, x, cy + dy) for dy in range(-1, 3))
+        if not has_ground:
             return True
     return False
 
@@ -105,7 +106,7 @@ def _build_edge(tw: TileWindow, skyline: dict[int, int], movement: MovementInfo,
     peak = _jump_peak(movement)
     envelope = _jump_envelope(movement, max_cols=adx + 1)
 
-    if adx <= 1 and abs(dy) <= 1:
+    if adx <= 1 and dy <= 1:
         return NavEdge("walk", dx, dy, _edge_cost("walk", dx, dy, in_water))
 
     if adx < len(envelope):
@@ -114,11 +115,17 @@ def _build_edge(tw: TileWindow, skyline: dict[int, int], movement: MovementInfo,
             if not _jump_clear(tw, src_wx, src_wy, dst_wx, envelope, sign):
                 return None
             return NavEdge("jump", dx, dy, _edge_cost("jump", dx, dy, in_water))
-        if dy <= 0:
-            if _has_floor_gap(tw, src_wx, dst_wx, dst_wy, sign):
+        if dy < 0:
+            return None
+        if dy == 0:
+            if _has_floor_gap(tw, src_wx, src_wy, dst_wx, dst_wy, sign):
                 return NavEdge("bridge", dx, dy, _edge_cost("bridge", dx, dy, in_water),
                                f"floor_gap adx={adx} dy={dy}")
-            return NavEdge("walk", dx, dy, _edge_cost("walk", adx, dy, in_water))
+            return None
+        return None
+
+    if dy <= 0:
+        return None
 
     if dy > peak:
         return NavEdge("pillar_bridge", dx, dy, _edge_cost("pillar_bridge", dx, dy, in_water),
@@ -128,7 +135,7 @@ def _build_edge(tw: TileWindow, skyline: dict[int, int], movement: MovementInfo,
                    f"adx={adx} >= envelope={len(envelope)} dy={dy} peak={peak:.1f}")
 
 
-def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
+def astar(state: GameState, sign: int, on_fail=None) -> list[tuple[int, int, NavEdge]] | None:
     tw = state.tile_window
     if tw is None or not tw.rows:
         return None
@@ -138,23 +145,18 @@ def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
     feet_y = int((p.pos[1] + p.height) / 16.0)
     movement = state.movement
 
-    skyline = scan_skyline(tw)
     standable = scan_standable(tw)
 
-    start_wx = pcx
-    start_wy = skyline.get(pcx, feet_y)
-
-    goal_wx = pcx + sign * _GOAL_RANGE
-    goal_wy = skyline.get(goal_wx)
-    if goal_wy is None:
-        for r in range(_GOAL_RANGE, 0, -1):
-            gw = pcx + sign * r
-            if gw in skyline:
-                goal_wx, goal_wy = gw, skyline[gw]
-                break
-    if goal_wy is None:
+    fwd = sorted([(nx, ny) for (nx, ny) in standable if sign * (nx - pcx) > 0],
+                 key=lambda p: -sign * p[0])
+    if not fwd:
         return []
+    goal_wx, goal_wy = fwd[0]
 
+    start_wx = pcx
+    start_wy = min((ny for (nx, ny) in standable if nx == pcx), default=feet_y)
+
+    skyline = scan_skyline(tw)
     if _has_living_tree(tw, skyline, start_wx, goal_wx):
         return None
 
@@ -164,7 +166,6 @@ def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
     g: dict[tuple[int, int], float] = {(start_wx, start_wy): 0.0}
     prev: dict[tuple[int, int], tuple[tuple[int, int], NavEdge] | None] = {(start_wx, start_wy): None}
     heap = [_Node(float(abs(goal_wx - start_wx) + abs(goal_wy - start_wy)), start_wx, start_wy)]
-    fail_reasons: dict[str, int] = {}
 
     while heap:
         node = heapq.heappop(heap)
@@ -172,7 +173,7 @@ def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
 
         if cx == goal_wx and cy == goal_wy:
             path = []
-            pos = (goal_wx, goal_wy)
+            pos = (cx, cy)
             while prev[pos] is not None:
                 ppos, edge = prev[pos]
                 path.append((pos[0], pos[1], edge))
@@ -186,26 +187,8 @@ def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
                 continue
             if abs(ny - cy) > max_dy + 10:
                 continue
-            adx = abs(nx - cx)
             edge = _build_edge(tw, skyline, movement, cx, cy, nx, ny)
             if edge is None:
-                dy = cy - ny
-                envelope = _jump_envelope(movement, max_cols=adx + 1)
-                if adx <= 1 and abs(dy) <= 1:
-                    reason = f"walk_blocked adx={adx} dy={dy}"
-                elif adx < len(envelope):
-                    reachable_dy = -envelope[adx]
-                    if 0 < dy <= reachable_dy:
-                        reason = f"jump_overhead_blocked adx={adx} dy={dy}"
-                    elif dy <= 0:
-                        reason = f"walk_blocked adx={adx} dy={dy}"
-                    else:
-                        reason = f"dy_out_of_range adx={adx} dy={dy} reachable={reachable_dy:.1f}"
-                elif dy <= 0:
-                    reason = f"downslope_too_far adx={adx} dy={dy}"
-                else:
-                    reason = f"unknown adx={adx} dy={dy}"
-                fail_reasons[reason] = fail_reasons.get(reason, 0) + 1
                 continue
             ng = cur_g + edge.cost
             npos = (nx, ny)
@@ -217,5 +200,26 @@ def astar(state: GameState, sign: int) -> list[tuple[int, int, NavEdge]] | None:
 
     reached = [(wx, wy) for (wx, wy) in g if wx != start_wx]
     furthest = max(reached, key=lambda pos: sign * pos[0], default=(start_wx, start_wy))
-    print(f"[astar] no path ({start_wx},{start_wy})→({goal_wx},{goal_wy}) furthest={furthest} fail_reasons={fail_reasons}")
+    print(f"[astar] no path ({start_wx},{start_wy})→({goal_wx},{goal_wy}) furthest={furthest}")
+    if on_fail is not None:
+        on_fail(standable, set(g.keys()), (start_wx, start_wy), (goal_wx, goal_wy))
     return []
+
+
+def astar_debug_path(state: GameState, sign: int, src: tuple[int,int], dst: tuple[int,int]):
+    """Print why A* chose a specific edge: enumerate all standable nodes between src and dst and their edge costs."""
+    tw = state.tile_window
+    if tw is None:
+        return
+    skyline = scan_skyline(tw)
+    standable = scan_standable(tw)
+    movement = state.movement
+    src_wx, src_wy = src
+    dst_wx, dst_wy = dst
+    between = sorted([(nx, ny) for (nx, ny) in standable
+                      if min(src_wx, dst_wx) <= nx <= max(src_wx, dst_wx)],
+                     key=lambda p: sign * -p[0])
+    print(f"[astar_debug] src={src} dst={dst} sign={sign}")
+    for nx, ny in between:
+        edge = _build_edge(tw, skyline, movement, src_wx, src_wy, nx, ny)
+        print(f"  ({src_wx},{src_wy})→({nx},{ny}) edge={edge}")
