@@ -1,0 +1,7 @@
+{
+  "frames": [
+    {"right": true, "repeat": 15},
+    {"right": true, "jump": true, "repeat": 15},
+    {"right": true, "repeat": 25}
+  ]
+}
