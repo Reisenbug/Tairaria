@@ -4,6 +4,17 @@ Claude Code 在本项目的行为准则。
 
 ---
 
+## 犯错记录
+
+历史踩坑见 `~/.claude/projects/-Users-lhy-Documents-Terraria-Agent/memory/feedback_lessons.md`。
+新错误在本轮结束时追加，不要重复犯同类错。
+
+## 代码要求
+不要写多余的注释。
+小心magic number。
+用户同意后再commit push。
+commit消息规范且尽可能分开。
+
 ## 1. 改动必须自己跑完闭环
 
 改完代码不算完,要走完 **改→编译→跑→读日志→判断**。
