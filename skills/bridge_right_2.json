@@ -1,29 +1,22 @@
 {
-  "smart_cursor": false,
+  "smart_cursor": true,
   "frames": [
-    {
-      "use_item": true,
-      "sc": 0,
-      "slot": 2,
-      "mx": 1.2,
-      "my": 1.7
-    },
     {
       "right": true,
       "use_item": true,
       "sc": 0,
       "slot": 2,
-      "mx": 0.8,
+      "mx": 0.5,
       "my": 1.7,
-      "repeat": 15
+      "repeat": 30
     },
     {
       "use_item": true,
       "sc": 0,
       "slot": 2,
-      "mx": 0.8,
+      "mx": 0.5,
       "my": 1.7,
-      "repeat": 10
+      "repeat": 5
     }
   ]
 }

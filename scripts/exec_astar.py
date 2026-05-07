@@ -2,7 +2,7 @@ import sys, os, time, json, urllib.request, signal, glob
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 _BASE = "http://127.0.0.1:17878"
-direction = "left"
+direction = "right"
 sign = 1 if direction == "right" else -1
 
 _REPORT_DIR = os.path.expanduser(
