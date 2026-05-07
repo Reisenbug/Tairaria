@@ -1,37 +1,117 @@
-# Terraria Agent
+# CLAUDE.md
 
-## Mod 控制協議教訓
+Claude Code 在本项目的行为准则。
 
-### JSON 格式敏感
-Python `json.dumps` 產出 `{"key": true}`（冒號後有空格）。C# 用 `Contains` 匹配時必須先 `Replace(" ", "")` 去空格，否則永遠匹配不上。
+---
 
-### 邊緣觸發 vs 電平觸發
-Terraria 的輸入系統對不同控制有不同語義：
-- **Jump**：需要 false→true 邊緣觸發。持續 true = 只跳一次。連跳必須留 gap 幀。
-- **SmartCursor**：toggle 型，rising edge 切換。持續 true = 閃爍。改用 pyautogui 模擬 ctrl 按鍵。
-- **Move/Attack**：電平觸發，持續 true 即可。
+## 1. 改动必须自己跑完闭环
 
-### Jump hold 時長
-hold 時間決定跳躍高度。1 幀 = 矮跳，36 幀 = 阻塞再觸發。15 幀 = Terraria 默認 jumpHeight，最優。
+改完代码不算完,要走完 **改→编译→跑→读日志→判断**。
 
-### Timeout 必須 > hold + gap
-ControlInput timeout 必須大於 JumpHoldFrames + gap 幀，否則 pending jump 在消費前就過期了。
+- 改 `.cs`:输出 "请在游戏内 `/build TerraBlind`,完成回复 1",**等回复再继续**
+- 改 Python:自己跑
+- 跑完必须 `grep` 日志,不只看 stdout
 
-### Tick 率 vs 遊戲幀率
-5TPS（200ms）對跳躍時機太慢。解法：把時序敏感邏輯（auto-jump）放 mod 端 60fps 處理。Python BT 決定「做什麼」，mod 處理「什麼時候」。
+## 2. 调试三步不可拆
 
-### 兩個 jump 源 = 衝突
-Python StuckJump + mod auto-jump 搶同一個 `_jumpFramesLeft`，導致間歇性失敗（heisenbug）。原則：一個機制只能有一個控制源。跳躍現在完全由 mod 端負責。
+```
+清日志 → 跑 → 读日志
+```
 
-### 手動序列化陷阱
-`StateSerializer.cs` 是手寫 StringBuilder，不會自動反射新欄位。加新欄位到 data class（如 `HotbarSlot`）後，**必須同步改 `AppendSlot`**，否則 JSON 裡不會出現。
+```bash
+> "$HOME/Library/Application Support/Terraria/tModLoader/TerraBlindLogs/jump_trace.log"
+```
 
-## 架構規則
+## 3. 跑测试必须设超时和清理
 
-### 動作歸屬
-- **Mod /control**：移動（WASD）、跳躍（auto-jump 60fps）、槽位選擇、useItem
-- **pyautogui**：鼠標座標/點擊（攻擊、交互）、SmartCursor 切換（ctrl 鍵）
-- 不要在兩條路徑上重複控制同一行為
+```bash
+> "$LOG"
+python -u scripts/exec_astar.py &
+PID=$!
+sleep 15
+curl -s -X POST http://localhost:17878/nav_stop -d '{}'
+kill $PID 2>/dev/null
+wait $PID 2>/dev/null
+```
 
-### 改完先測
-改動代碼/mod 後，先給用戶測試步驟，等確認通過再 commit。不要盲提交。
+不带 `/nav_stop` 退出 = mod 还在动。
+
+## 4. 用数据说话
+
+调参问题给统计指标:
+
+```
+n=23 mean=-1.87 min=-4 max=0
+```
+
+n < 10 不算验证通过。禁止 "看起来差不多了"。
+
+## 5. 二分定位,不猜原因
+
+bug 出现按顺序:
+
+1. 复现
+2. 隔离(Python 端 / mod 端)
+3. 缩小(`/plan_path` 对吗?`/jump` 单调对吗?)
+4. 日志找最早异常 tick
+5. **才**改代码
+
+## 6. 一次一个变量
+
+不要一把改三个参数。改一个 → 跑数据 → 记 → 下一个。
+
+## 7. 改前先 grep
+
+```bash
+grep -rn "stopAhead" .
+```
+
+本项目有已弃用但未删除的文件(`terrain_astar2.py`、`terrain_nav.py`),容易改错。
+
+## 8. 不确定先查文档
+
+- **游戏知识**(物品 ID、boss 行为、地形规则等):https://terraria.wiki.gg/
+- **tModLoader API**(类、Hook、生命周期等):http://docs.tmodloader.net/docs/stable/
+
+不查就猜 = bug 来源。
+
+## 9. 提交前自检
+
+- [ ] 编译通过
+- [ ] 跑了至少一次完整测试
+- [ ] 日志无新增 WARN/ERROR
+- [ ] 关键指标有数据
+- [ ] 没改到已弃用文件
+- [ ] `/nav_stop` 能停
+
+## 10. 必须问的情况
+
+- 改存档 / 角色配置
+- kill 进程或改项目外文件
+- 改 HTTP API 契约
+- 改物理参数硬编码
+- 大调 cost 权重
+
+---
+
+## 关键参考
+
+**日志路径**
+```
+~/Library/Application Support/Terraria/tModLoader/TerraBlindLogs/jump_trace.log
+```
+
+**HTTP API**:端口 17878,详见 `PROJECT_OVERVIEW.md`
+
+**物理参数(裸玩家)**
+
+| 参数 | 值 |
+|------|-----|
+| jumpSpeed | 5.01 |
+| jumpHeight | 15 |
+| gravity | 0.4 |
+| maxRunSpeed | 3.0 |
+| accRunSpeed | 0.08 |
+| runSlowdown | 0.2(仅地面) |
+
+空中无水平摩擦,松手后 vx 几乎不变。

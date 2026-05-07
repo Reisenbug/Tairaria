@@ -2,10 +2,7 @@ import sys, os, time, json, urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient
-from terraria_agent.terrain_astar2 import (
-    astar2, _solid, _standable, _dist_to_ground, _step_cost,
-    fetch_jump_envelope, _GOAL_RANGE, _MAX_BRIDGE,
-)
+from terraria_agent.terrain_astar2 import fetch_jump_envelope
 
 perception = TerraBlindClient()
 _BASE = "http://127.0.0.1:17878"
@@ -20,6 +17,22 @@ def _post(path, data):
         urllib.request.urlopen(req, timeout=1)
     except Exception:
         pass
+
+
+def _plan_path():
+    try:
+        body = json.dumps({"sign": sign}).encode()
+        req = urllib.request.Request(_BASE + "/plan_path", data=body, method="POST")
+        resp = urllib.request.urlopen(req, timeout=5)
+        data = json.loads(resp.read())
+        if "error" in data:
+            return None
+        nodes = data.get("path", [])
+        cost = data.get("cost", 0)
+        return [(n["wx"], n["wy"], n["action"]) for n in nodes], cost
+    except Exception as e:
+        print(f"[plan_path] {e}")
+        return None
 
 
 while True:
@@ -37,9 +50,9 @@ while True:
     feet_y = int((p.pos[1] + p.height) / 16.0)
 
     t0 = time.time()
-    result = astar2(state, sign)
+    result = _plan_path()
     dt = time.time() - t0
-    print(f"[time] astar2 {dt*1000:.0f}ms")
+    print(f"[time] plan_path {dt*1000:.0f}ms")
     if result:
         for wx, wy, action in result[0]:
             if action == "bridge":

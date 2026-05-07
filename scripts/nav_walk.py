@@ -9,7 +9,7 @@ from terraria_agent.agent import _load_skill_frames
 perception = TerraBlindClient()
 controller = ModController()
 nav = Navigator(controller, _load_skill_frames)
-nav.set_direction("right")
+nav.set_direction("left")
 
 while True:
     state = perception.detect(frame=None)

@@ -27,10 +27,10 @@ def _planned_blocks(path, pcx, feet_y):
         if edge.action in ("pillar", "pillar_bridge"):
             rise = cur_y - wy
             for i in range(rise):
-                pillar_tiles.add((cur_x, cur_y + i))
+                pillar_tiles.add((cur_x, cur_y - 1 - i))
         if edge.action in ("bridge", "pillar_bridge"):
-            bridge_y = wy
-            x0, x1 = (wx, cur_x) if wx > cur_x else (cur_x, wx)
+            bridge_y = wy - 1
+            x0, x1 = (min(cur_x, wx), max(cur_x, wx))
             for bx in range(x0, x1 + 1):
                 bridge_tiles.add((bx, bridge_y))
         cur_x, cur_y = wx, wy
@@ -59,7 +59,7 @@ while True:
     if path is None:
         print(f"[vis] living tree at ({pcx},{feet_y})")
     elif not path:
-        goal_wx = pcx + sign * 45
+        goal_wx = pcx + sign * 40
         print(f"[vis] no path at ({pcx},{feet_y}) in_skyline={pcx in skyline} skyline_y={skyline.get(pcx)} goal_wx={goal_wx} goal_in_skyline={goal_wx in skyline}")
     path_cols = {}
     if path:
@@ -111,6 +111,30 @@ while True:
         rows.append(f"{wy:4d} {row}")
 
     if path:
-        _post("/path_vis", [[pcx, feet_y]] + [[wx, wy] for wx, wy, _ in path])
+        _ACTION_COLOR = {
+            "walk":         (100, 220, 255),
+            "jump":         (100, 255, 100),
+            "bridge":       (255, 180,   0),
+            "pillar":       (255,  80,  80),
+            "pillar_bridge":(255,  80, 255),
+        }
+        tiles = [{"wx": pcx, "wy": feet_y, "r": 255, "g": 255, "b": 255}]
+        labels = []
+        cx0, cy0 = pcx, feet_y
+        for wx, wy, edge in path:
+            r, g, b = _ACTION_COLOR.get(edge.action, (255, 255, 255))
+            steps = abs(wx - cx0)
+            for i in range(steps + 1):
+                t = i / max(steps, 1)
+                ix = int(cx0 + (wx - cx0) * t)
+                iy = int(cy0 + (wy - cy0) * t)
+                tiles.append({"wx": ix, "wy": iy, "r": r, "g": g, "b": b})
+            reason_str = f" {edge.reason}" if edge.reason else ""
+            labels.append({"wx": wx, "wy": wy,
+                           "text": f"{edge.action} c={edge.cost:.0f} dx={edge.dx} dy={edge.dy}{reason_str}",
+                           "r": r, "g": g, "b": b})
+            cx0, cy0 = wx, wy
+        _post("/path_vis_tiles", tiles)
+        _post("/debug_labels", labels)
 
     time.sleep(2.0)
