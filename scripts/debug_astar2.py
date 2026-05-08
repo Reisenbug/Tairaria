@@ -92,7 +92,7 @@ while True:
                     for f in frames:
                         if f["j"]: hold += 1
                         else: break
-                    px, py, vx, vy = float(src_x), float(src_y), 0.0, 0.0
+                    px, py, vx, vy = float(src_x), float(src_y), float(sign * 1.5), 0.0
                     jfl = hold
                     for f in frames:
                         right, left, jump = f["r"], f["l"], f["j"]
@@ -104,7 +104,7 @@ while True:
                             vy = min(vy + 0.2, 10)
                         px += vx; py += vy
                         bx = int((px + 10) / 16)
-                        by = int((py + 42) / 16)
+                        by = int((py + 42) / 16) - 1
                         tiles.append({"wx": bx, "wy": by, "r": 100, "g": 255, "b": 100})
                 else:
                     adx = abs(wx - prev_wx)
