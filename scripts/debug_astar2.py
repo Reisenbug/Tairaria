@@ -29,7 +29,7 @@ def _plan_path():
             return None
         nodes = data.get("path", [])
         cost = data.get("cost", 0)
-        return [(n["wx"], n["wy"], n["action"]) for n in nodes], cost
+        return [(n["wx"], n["wy"], n["action"], n.get("frames"), n.get("swx"), n.get("swy")) for n in nodes], cost
     except Exception as e:
         print(f"[plan_path] {e}")
         return None
@@ -54,7 +54,7 @@ while True:
     dt = time.time() - t0
     print(f"[time] plan_path {dt*1000:.0f}ms")
     if result:
-        for wx, wy, action in result[0]:
+        for wx, wy, action, *_ in result[0]:
             if action == "bridge":
                 print(f"  [bridge] ({wx},{wy}) from_y={wy}")
 
@@ -77,7 +77,7 @@ while True:
         rise_run = 0
         rise_start_y = feet_y
         rise_x = pcx
-        for wx, wy, action in path:
+        for wx, wy, action, frames, swx, swy in path:
             if action == "bridge":
                 adx = abs(wx - prev_wx)
                 dy_per_step = (wy - prev_y) / max(adx, 1)
@@ -85,16 +85,35 @@ while True:
                     by = int(prev_y + dy_per_step * (i + 1))
                     tiles.append({"wx": bx, "wy": by, "r": 180, "g": 0, "b": 255})
             elif action == "jump":
-                adx = abs(wx - prev_wx)
-                js = 1 if wx > prev_wx else -1
-                envelope = fetch_jump_envelope(max_cols=adx + 1)
-                for i in range(adx + 1):
-                    bx = prev_wx + js * i
-                    by = prev_y + envelope[i]
-                    tiles.append({"wx": bx, "wy": by, "r": 100, "g": 255, "b": 100})
-                arc_end_y = prev_y + envelope[adx]
-                for y in range(arc_end_y, wy):
-                    tiles.append({"wx": wx, "wy": y, "r": 100, "g": 255, "b": 100})
+                if frames:
+                    src_x = (swx if swx else prev_wx) * 16 - 10 + 8
+                    src_y = (swy if swy else prev_y) * 16 - 42
+                    hold = 0
+                    for f in frames:
+                        if f["j"]: hold += 1
+                        else: break
+                    px, py, vx, vy = float(src_x), float(src_y), 0.0, 0.0
+                    jfl = hold
+                    for f in frames:
+                        right, left, jump = f["r"], f["l"], f["j"]
+                        if right:  vx = min(vx + 0.08, 3.6)
+                        elif left: vx = max(vx - 0.08, -3.6)
+                        if jump and jfl > 0: vy = -5.81; jfl -= 1
+                        else:
+                            if not jump: jfl = 0
+                            vy = min(vy + 0.2, 10)
+                        px += vx; py += vy
+                        bx = int((px + 10) / 16)
+                        by = int((py + 42) / 16)
+                        tiles.append({"wx": bx, "wy": by, "r": 100, "g": 255, "b": 100})
+                else:
+                    adx = abs(wx - prev_wx)
+                    js = 1 if wx > prev_wx else -1
+                    envelope = fetch_jump_envelope(max_cols=adx + 1)
+                    for i in range(adx + 1):
+                        bx = prev_wx + js * i
+                        by = prev_y + envelope[i]
+                        tiles.append({"wx": bx, "wy": by, "r": 100, "g": 255, "b": 100})
             node_color = (255, 80, 80) if action == "pillar" else (255, 200, 0) if action == "jump" else (180, 0, 255) if action == "bridge" else (100, 220, 255)
             tiles.append({"wx": wx, "wy": wy, "r": node_color[0], "g": node_color[1], "b": node_color[2]})
             if wy > prev_y and action not in ("bridge", "jump"):
