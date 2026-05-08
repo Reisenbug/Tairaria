@@ -6,7 +6,7 @@ from terraria_agent.terrain_astar2 import fetch_jump_envelope
 
 perception = TerraBlindClient()
 _BASE = "http://127.0.0.1:17878"
-direction = "left"
+direction = "right"
 sign = 1 if direction == "right" else -1
 
 
