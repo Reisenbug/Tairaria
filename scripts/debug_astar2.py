@@ -54,9 +54,11 @@ while True:
     dt = time.time() - t0
     print(f"[time] plan_path {dt*1000:.0f}ms")
     if result:
+        prev_node = (pcx, feet_y)
         for wx, wy, action, *_ in result[0]:
-            if action == "bridge":
-                print(f"  [bridge] ({wx},{wy}) from_y={wy}")
+            rise = prev_node[1] - wy
+            print(f"  [{action}] ({wx},{wy}) from=({prev_node[0]},{prev_node[1]}) dy={rise:+d}")
+            prev_node = (wx, wy)
 
     if not result:
         print(f"[vis] no path at ({pcx},{feet_y})")
@@ -104,7 +106,7 @@ while True:
                             vy = min(vy + 0.2, 10)
                         px += vx; py += vy
                         bx = int((px + 10) / 16)
-                        by = int((py + 42) / 16) - 1
+                        by = int((py + 21) / 16)
                         tiles.append({"wx": bx, "wy": by, "r": 100, "g": 255, "b": 100})
                 else:
                     adx = abs(wx - prev_wx)
