@@ -71,17 +71,19 @@ Python (scripts/)          mod TerraBlind (C#, 60fps)
 ```
 Start(sign)
   └─ Idle ──→ 读下一个path节点
-               ├─ action=move  → Move
-               ├─ action=fall  → Fall
-               ├─ action=jump  → JumpCoordinator.Start() → Jump
+               ├─ action=move   → Move（方向由 target.Wx vs pcx 决定，非全局 sign）
+               ├─ action=fall   → Fall
+               ├─ action=jump   → ResimJump(startVx=p.velocity.X) → ReplaySystem → Jump
                ├─ action=bridge → Bridge (PlaceCoordinator)
-               └─ rise > PillarThresh → SkillExecutor.StartPillarJump → Pillar
+               └─ action=pillar → PillarAlign → SkillExecutor.StartPillarJump → Pillar
+                   （rise > PillarThresh 的 move 节点也会强制走 PillarAlign）
 
-  Move: 按方向键直到cx到达targetX，到达→pathIdx++→Idle
-  Fall: 按方向键，落地检测→pathIdx++→Idle
-  Jump: 等JumpCoordinator.Done→pathIdx++→Idle
-  Bridge: PlaceCoordinator放砖+走，到达→pathIdx++→Idle
-  Pillar: 等SkillExecutor结束→Move
+  Move:       方向键到 targetX，到达→pathIdx++→Idle
+  Fall:       方向键，落地检测→pathIdx++→Idle
+  Jump:       ReplaySystem 执行帧序列，落地→pathIdx++→Idle
+  Bridge:     PlaceCoordinator放砖+走，到达→pathIdx++→Idle
+  PillarAlign: 物理预测刹车距离，走到 pillar 起跳 x，停稳→SkillExecutor
+  Pillar:     SkillExecutor 跑完→高度校验→pathIdx++→Idle（失败→Replan）
 
   path空 → PathPlanner.Plan(sign) 重规划
   Stall (60帧×4次pcx不变) → Replan
@@ -94,43 +96,38 @@ Start(sign)
 ## PathPlanner (A*) 逻辑
 
 - **起点**：`pcx = centerX/16`, `feetY` 从底部往上找第一个非实心格
-- **终点**：扫描 `pcx±40` 范围内每列第一个standable格，取最接近 `pcx+sign*40` 的
+- **终点**：扫描 `pcx-60..pcx+60` 范围内每列第一个standable格，取 score 最高的（fwd + rise*2）
 - **邻居边**：
-  - `move` (dx=±1, dy=0)：cost = `1 + dist_to_ground`
+  - `move` (dx=±1, dy=0/±1)：cost = `1 + dist_to_ground`
   - `fall` (dy=+1)：cost = `0.5`
-  - 不允许纯向上move (dy=-1)
-- **跳跃边**：用 `BuildEnvelope()` 算弧线，扫cols 1..5，cost = `max(4+col-rise_bonus, 1)`
+  - 不允许纯向上 move
+- **跳跃边**：`BuildJumpEdges` 用 PhysicsSimulator 精确积分，扫所有 HoldFrameOptions；cost = `max(col + overhead - rise_bonus, 1)`
+  - pillar 后的跳跃节点用 `overrideVx=0f`（玩家从静止起跳）
+  - 普通节点用 `sign * MaxRun`
+  - `ArcClipsWall`：仅检查上升阶段头行 tile，侧面不拦截
+- **pillar边**：同列向上延伸，rise > 7 格触发，cost = `3 + rise`
 - **bridge边**：沿方向延伸 1..15格，cost = `4 + col*2 + shallow_penalty`
-- **fallback**：goal不可达时取已访问中最前进的standable节点
-
-### BuildEnvelope 物理公式
-
-```
-holdSpeed = jumpSpeed - gravity
-phase1 = jumpHeight+1 帧（按住jump键）
-phase2 = holdSpeed/gravity 帧（速度仍在上升）
-peak之后自由落体
-
-t = col * 16 / maxRunSpeed   # 水平飞多少帧到达col列
-risePx = 对应t时刻的上升像素
-env[col] = int(-risePx / 16)  # 负值=上升（y轴向下）
-```
+- **GoalRangeFwd=60, GoalRangeBack=60**（支持规划绕道回退路径）
+- **MVP 假设**：maxRunSpeed=3.0（裸玩家），buff 场景加 WARN log 但不处理
 
 ---
 
 ## JumpCoordinator 逻辑
 
+JumpCoordinator 负责精确对位起跳点（launchX），ReplaySystem 负责执行跳跃帧序列。
+
 ```
-Start(dirRight, launchX, targetX)
-  阶段1: 走到launchX（centerX距launchX<=8px时起跳）
-  阶段2: 按住jump (jumpHeight+2帧) + 按方向键
-  空中: 计算 stopAhead = vx * 2f
-        pastTarget = (cx + stopAhead >= targetX)  # 右跳
-        未过目标：继续按方向键
+StartReplay(dirRight, launchX)
+  阶段1: 走到 launchX（posOk && vxOk 时触发，标记 _active=false）
+  → NavCoordinator 检测到 JumpCoordinator 不再 active，ReplaySystem 开始回放跳跃帧
+
+Start(dirRight, launchX, targetX)  ← 备用，非replay模式
+  阶段1: 走到 launchX
+  阶段2: 按住 jump (jumpHeight+2帧) + 按方向键
   落地: prevVY > 0 && velocity.Y == 0 → Done
 ```
 
-**已知问题：stopAhead系数需要调试，目前每跳落点偏差约-2格（偏短）**
+**ResimJump**（在 NavCoordinator 内）：进入 Jump 状态时，用 `p.velocity.X` 作为 startVx，遍历 HoldFrameOptions，选落点最接近 target.Wx 的 hold，生成 ReplayFrame 序列。pillar→jump 时 vx≈0，普通 move→jump 时 vx≈MaxRun，两种情况自动处理。
 
 ---
 
@@ -174,9 +171,9 @@ curl -X POST http://localhost:17878/nav_stop -d '{}'
 
 ### 3. 跳跃落点偏差
 **现象**：expected 2149，landed 2147，差2格
-**原因**：`stopAhead` 松手预测不准，空中无摩擦但落地有惯性
-**当前状态**：`stopAhead = vx * 2f`，待验证
-**调试方法**：清空日志 → 跑15秒 → `grep "jump landed" log | awk '{print $5, $8}'` 对比
+**原因**：ResimJump 在起跳时模拟，但实际起跳时机（posOk && vxOk）有 ±4px 误差，累积为 ±1 格偏差
+**当前目标（MVP）**：mean 误差 < 0.5 格（裸玩家，无 buff）
+**调试方法**：清空日志 → 跑15秒 → grep node_exit + landed 对比
 
 ### 4. bridge方向dx不对称
 - 右：`dx=1, dy=1`（放脚前方1格右侧）
