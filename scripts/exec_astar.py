@@ -1,4 +1,5 @@
 import sys, os, time, json, urllib.request, signal, glob
+from pynput import keyboard as kb
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 _BASE = "http://127.0.0.1:17878"
@@ -13,6 +14,52 @@ _MAP_LOG = os.path.expanduser(
 )
 _seen_reports = set()
 _last_event_line = 0
+_frozen = False
+_started = False
+
+
+def _freeze():
+    global _frozen
+    _post("/freeze")
+    _frozen = True
+    state = _get("/state")
+    nav = state.get("nav_state", "?")
+    px, py = state.get("px", 0), state.get("py", 0)
+    print(f"[debug] PAUSED  nav={nav} px={px:.1f} py={py:.1f}")
+
+
+def _unfreeze():
+    global _frozen
+    _post("/unfreeze")
+    _frozen = False
+    print("[debug] RESUMED")
+
+
+def _step():
+    _post("/step_node")
+    state = _get("/state")
+    nav = state.get("nav_state", "?")
+    px, py = state.get("px", 0), state.get("py", 0)
+    print(f"[debug] STEP    nav={nav} px={px:.1f} py={py:.1f}")
+
+
+def _on_press(key):
+    global _started
+    try:
+        c = key.char
+    except AttributeError:
+        return
+    if c == 'p' and not _started:
+        _started = True
+        print(f"[nav] starting, direction={direction}")
+        _post("/nav_start", {"sign": sign})
+    elif c == 'l':
+        if _frozen:
+            _unfreeze()
+        else:
+            _freeze()
+    elif c == 's' and _frozen:
+        _step()
 
 
 def _post(path, data=None):
@@ -167,10 +214,12 @@ signal.signal(signal.SIGTERM, _handle_exit)
 
 open(_MAP_LOG, "w").close()
 
-print(f"[nav] starting, direction={direction}")
-_post("/nav_start", {"sign": sign})
-
-while True:
-    time.sleep(1)
-    _check_reports()
-    _check_events()
+print(f"[nav] ready. press [p] to start, [l] to pause/resume, [s] to step (when paused)")
+with kb.Listener(on_press=_on_press):
+    while True:
+        if not _frozen:
+            _check_reports()
+            _check_events()
+            time.sleep(0.2)
+        else:
+            time.sleep(0.05)
