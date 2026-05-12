@@ -58,7 +58,7 @@ def _on_press(key):
             _unfreeze()
         else:
             _freeze()
-    elif c == 's' and _frozen:
+    elif c == 'k' and _frozen:
         _step()
 
 
@@ -214,7 +214,7 @@ signal.signal(signal.SIGTERM, _handle_exit)
 
 open(_MAP_LOG, "w").close()
 
-print(f"[nav] ready. press [p] to start, [l] to pause/resume, [s] to step (when paused)")
+print(f"[nav] ready. press [p] to start, [l] to pause/resume, [k] to step (when paused)")
 with kb.Listener(on_press=_on_press):
     while True:
         if not _frozen:
