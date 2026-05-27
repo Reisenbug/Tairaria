@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient, scan_surface
-from terraria_agent.terrain_nav import Navigator
+from terraria_agent.cerebellum.nav_client import NavClient
 from terraria_agent.geometry import player_center_world, world_to_screen
 from terraria_agent.hand.mod_controller import ModController
 from terraria_agent.llm_client import LLMClient
@@ -408,7 +408,7 @@ def run() -> None:
     trigger = TriggerDetector()
     _stuck_handling = [False]
     goal_exec = GoalExecutor(controller)
-    nav = Navigator(controller, _load_skill_frames)
+    explore_nav = NavClient()
     print("[agent] 启动 — ctrl+c 停止")
 
     first_state = None
@@ -456,6 +456,7 @@ def run() -> None:
         _inv_before[0] = dict(state.inventory)
         if goal_name == "chop_tree":
             _trees_chopped[0] += 1
+        explore_nav.stop()    # yield control to the goal's own NavClient
         goal_exec.start(goal_name, target, timeout, _on_goal_done)
         current_ctrl = {}
         deadline = now + timeout + 2.0
@@ -629,14 +630,26 @@ def run() -> None:
             else:
                 actions = [GameAction(action=ActionType.NONE)]
         elif not goal_exec.active and not _stuck_handling[0]:
-            nav.set_direction(_explore_direction)
-            nav_ctrl = nav.tick(state)
-            if nav_ctrl is not None:
-                actions = _parse_actions(nav_ctrl, state) if nav_ctrl else [GameAction(action=ActionType.NONE)]
-            elif current_ctrl:
-                actions = _parse_actions(current_ctrl, state)
+            # free exploration: keep a long-range sentinel goal in the explore direction;
+            # mod's segmented nav handles the actual movement. Flip direction if it fails.
+            p = state.player
+            pcx = int((p.pos[0] + p.width / 2.0) / 16)
+            pcy = int((p.pos[1] + p.height) / 16)
+            sign = 1 if _explore_direction == "right" else -1
+            target = (pcx + sign * 200, pcy)
+
+            if explore_nav.current_goal() is None:
+                r = explore_nav.start(target[0], target[1], player_tile=(pcx, pcy))
+                if r.status == "failed":
+                    _explore_direction = "left" if _explore_direction == "right" else "right"
+                    print(f"[explore] nav 启动失败 {r.reason}, 反转 → {_explore_direction}")
             else:
-                actions = [GameAction(action=ActionType.NONE)]
+                r = explore_nav.poll()
+                if r.status == "failed":
+                    _explore_direction = "left" if _explore_direction == "right" else "right"
+                    print(f"[explore] nav {r.reason} ({r.human}), 反转 → {_explore_direction}")
+            # mod is driving controls; we emit nothing this tick
+            actions = [GameAction(action=ActionType.NONE)]
         elif current_ctrl:
             actions = _parse_actions(current_ctrl, state)
         else:
