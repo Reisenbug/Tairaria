@@ -28,8 +28,8 @@ def serialize(state: GameState, focus: str = "deadline") -> str:
     want_enemies = focus in ("deadline", "血量骤降")
     want_drops   = focus in ("deadline",)
     want_objects = focus in ("deadline", "发现箱子")
-    want_inv     = focus in ("deadline", "发现新物品", "掉落_武器", "掉落_水果")
-    want_craft   = focus in ("deadline", "发现新物品", "掉落_武器", "掉落_水果")
+    want_inv     = focus in ("发现新物品", "掉落_武器", "掉落_水果")
+    want_craft   = focus in ("发现新物品", "掉落_武器", "掉落_水果")
     want_buffs   = focus in ("血量骤降",)
 
     if want_buffs and p.buffs:
@@ -61,7 +61,8 @@ def serialize(state: GameState, focus: str = "deadline") -> str:
         parts = []
         for o in close_objs:
             dx, dy = _rel(o.pos, pcx, pcy)
-            parts.append(f"{o.type}(rel={dx:+d},{dy:+d})")
+            side = "right" if dx >= 0 else "left"
+            parts.append(f"{o.type}({side},{abs(dx)}t)")
         lines.append(f"objects=[{', '.join(parts)}]")
 
     if want_tiles and state.detected_tiles:

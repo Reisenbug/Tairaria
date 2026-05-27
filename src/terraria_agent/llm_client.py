@@ -32,10 +32,10 @@ _SYSTEM = f"""\
 
 ## 可用目标（方式一）
 
-- open_chest：走到箱子旁边，自动开箱并掏空。target type="chest"
-- chop_tree：走到树旁边，持续砍伐直到树消失。target type="tree"
+- open_chest：走到最近箱子旁边，自动开箱并掏空。target={{"type":"chest"}}
+- chop_tree：走到最近树旁边，持续砍伐直到树消失。target={{"type":"tree"}}
 
-target 的 rel_x/rel_y 来自 objects 列表的 rel 字段（相对玩家中心的 tile 偏移）。
+executor 自动寻找最近的同类对象，无需指定坐标。
 timeout 建议：open_chest 15，chop_tree 30。
 
 ## 可用技能（方式二）
@@ -65,10 +65,15 @@ timeout 建议：open_chest 15，chop_tree 30。
 - 确定方向后坚持，不要频繁换向
 - 状态与上次相似且目标未完成，直接继续上次的 skill，无需重新分析
 
+## 状态字段说明
+
+- nav_status：当前导航状态。running=导航进行中勿重复发goal；idle=空闲可发新goal；failed:xxx=上次失败原因
+- objects：附近对象，格式 type(left/right,距离t)。executor 自动找最近的，无需坐标。
+
 ## 示例
 
-{{"思考": "发现箱子在右方12格，走过去开箱", "goal": "open_chest", "target": {{"type": "chest", "rel_x": 12, "rel_y": 0}}, "timeout": 15}}
-{{"思考": "发现高树在左方8格，砍树获取木材", "goal": "chop_tree", "target": {{"type": "tree", "rel_x": -8, "rel_y": 0}}, "timeout": 30}}
+{{"思考": "发现箱子，走过去开箱", "goal": "open_chest", "target": {{"type": "chest"}}, "timeout": 15}}
+{{"思考": "发现高树，砍树获取木材", "goal": "chop_tree", "target": {{"type": "tree"}}, "timeout": 30}}
 {{"思考": "地形平坦，向右探索", "skill": "explore_right", "持续秒数": 20.0}}
 {{"思考": "有敌人，攻击", "skill": "fight_nearest", "持续秒数": 5.0}}
 {{"思考": "有木材可制作木平台", "skill": "craft", "item_id": 94, "amount": 20}}

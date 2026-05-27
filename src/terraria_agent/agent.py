@@ -576,6 +576,15 @@ def run() -> None:
             if trigger_reason:
                 state_text = serialize(state, focus=trigger_reason)
                 state_text += f"\ntrees_chopped={_trees_chopped[0]}/{_TREE_CHOP_LIMIT}"
+                if goal_exec.active:
+                    nav_status = "running"
+                elif explore_nav.is_running():
+                    r = explore_nav.last_result()
+                    nav_status = f"failed:{r.reason}" if r and r.status == "failed" else "running"
+                else:
+                    lr = explore_nav.last_result()
+                    nav_status = f"failed:{lr.reason}" if lr and lr.status == "failed" else "idle"
+                state_text += f"\nnav_status={nav_status}"
                 print(f"[触发:{trigger_reason}]")
                 if trigger_reason == "卡住":
                     if _handle_stuck(state, controller, perception, _stuck_handling):
