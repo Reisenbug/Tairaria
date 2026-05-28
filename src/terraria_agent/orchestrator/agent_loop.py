@@ -1,3 +1,5 @@
+# LEGACY: This orchestrator (BT tree + Commander + Tactician) is no longer active.
+# Active agent: terraria_agent/agent.py run()
 from __future__ import annotations
 
 import threading

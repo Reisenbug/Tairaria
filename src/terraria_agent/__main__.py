@@ -1,3 +1,5 @@
+# LEGACY: entry point for old BT-based orchestrator, not in use.
+# To run the active agent: python -c "from terraria_agent.agent import run; run()"
 from __future__ import annotations
 
 import os
