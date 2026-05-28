@@ -58,12 +58,25 @@ timeout 建议：open_chest 15，chop_tree 30。
 
 ## Terraria 世界地理与导航
 
-- 丛林在世界一侧，雪地在另一侧，出生点在中央
+- 丛林与地牢(Dungeon)在世界两侧，雪地在地牢侧，邪恶biome(corruption/crimson)也倾向地牢侧
 - detected_tiles 含 hardened_sand 或 sandstone → 当前方向有丛林，继续走
 - biome=snow 或 corruption 或 crimson → 丛林在另一侧，换方向
 - biome=jungle → 已到达丛林，继续探索即可
 - 确定方向后坚持，不要频繁换向
 - 状态与上次相似且目标未完成，直接继续上次的 skill，无需重新分析
+
+## 丛林探索
+
+- 丛林主洞(main cave)通常是地面上有背景墙的洞口，进去后会扩展成更大空间
+- 丛林山丘洞(hill cave)出现在大土丘侧面，不保证深或有好装备，优先级低于主洞
+- 主洞内不需要挖掘，如果必须挖才能前进则可能是假入口（除非遇到蜂巢或神庙）
+- 遇到洞口优先进去探查，走过不回头代价更大
+
+## 地形识别
+
+- 地下沙漠(ug desert)：有背景墙、近似椭圆形、沙子延伸很深
+- 沙丘(sand dune/fake desert)：沙层浅可见下方泥土、有山丘起伏、绿洲更常见
+- 活树(living tree)：通常只值得检查顶部房间（活木箱+织布机）；若活树连接沙漠则可以一路向下找沙漠箱
 
 ## 状态字段说明
 
