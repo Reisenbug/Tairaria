@@ -6,7 +6,7 @@ import threading
 from dotenv import load_dotenv
 load_dotenv()
 
-from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient, scan_surface
+from terraria_agent.cerebellum.terra_blind_client import TerraBlindClient
 from terraria_agent.cerebellum.nav_client import NavClient
 from terraria_agent.geometry import player_center_world, world_to_screen
 from terraria_agent.hand.mod_controller import ModController
@@ -23,8 +23,6 @@ from terraria_agent.hand.hotbar_organizer import organize_hotbar
 
 _EXEC_TICK = 0.2
 _TILE = 16.0
-_STUCK_SECONDS = 1.0
-_STUCK_SPEED_THRESHOLD = 0.5
 _HP_DROP_THRESHOLD = 0.4
 _TACTICIAN_INTERVAL = 60.0
 _DEFAULT_DEADLINE = 10.0
@@ -42,9 +40,6 @@ _FRUITS = {
 _WEAPONS_CATEGORY = "weapon"
 
 
-_STUCK_WINDOW = 1.0
-_STUCK_NET_TILES = 1.0
-
 class TriggerDetector:
     def __init__(self) -> None:
         self._prev_enemy_ids: set[int] = set()
@@ -54,24 +49,10 @@ class TriggerDetector:
         self._prev_max_hp: int = 1
         self._prev_chest_ids: set[tuple[int, int]] = set()
         self._prev_drop_names: set[str] = set()
-        self._pos_history: list[tuple[float, float]] = []
 
     def check(self, state: GameState, current_ctrl: dict, now: float) -> str | None:
         p = state.player
 
-        has_horizontal = current_ctrl.get("left") or current_ctrl.get("right")
-        if has_horizontal:
-            self._pos_history.append((now, p.pos[0]))
-            if len(self._pos_history) >= 2:
-                oldest_t, oldest_x = self._pos_history[0]
-                elapsed = now - oldest_t
-                net = abs(p.pos[0] - oldest_x) / _TILE
-                if elapsed >= _STUCK_WINDOW and net < _STUCK_NET_TILES:
-                    self._pos_history.clear()
-                    return "卡住"
-            self._pos_history = [(t, x) for t, x in self._pos_history if now - t <= _STUCK_WINDOW]
-        else:
-            self._pos_history.clear()
         if self._prev_hp >= 0:
             drop = self._prev_hp - p.hp
             if drop > self._prev_max_hp * _HP_DROP_THRESHOLD:
@@ -222,178 +203,6 @@ def _cave_bypass_worker(controller, cave_dir: str) -> None:
     print(f"[cave bypass] replay {len(frames)} 帧")
     controller.replay_skill(frames)
 
-def _overhead_clear(state) -> bool:
-    tw = state.tile_window
-    if tw is None:
-        return True
-    p = state.player
-    head_y = int(p.pos[1] / 16.0)
-    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
-    for col in (pcx, pcx + 1):
-        for dy in range(1, 11):
-            t = tw.tile_at(col, head_y - dy)
-            if t is not None and t.solid:
-                return False
-    return True
-
-
-def _overhead_shallow(state) -> bool:
-    tw = state.tile_window
-    if tw is None:
-        return False
-    p = state.player
-    head_y = int(p.pos[1] / 16.0)
-    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
-    for col in (pcx, pcx + 1):
-        for dy in range(1, 4):
-            t = tw.tile_at(col, head_y - dy)
-            if t is not None and t.solid:
-                return True
-    return False
-
-
-def _overhead_deep(state) -> bool:
-    tw = state.tile_window
-    if tw is None:
-        return False
-    p = state.player
-    head_y = int(p.pos[1] / 16.0)
-    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
-    for col in (pcx, pcx + 1):
-        for dy in range(4, 11):
-            t = tw.tile_at(col, head_y - dy)
-            if t is not None and t.solid:
-                return True
-    return False
-
-
-def print_surface_map(state) -> None:
-    tw = state.tile_window
-    if tw is None:
-        print("[surface_map] 无 tile_window")
-        return
-    p = state.player
-    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
-    feet_y = int((p.pos[1] + p.height) / 16.0)
-    surface = scan_surface(tw)
-    ox, oy = tw.origin
-    rows = []
-    for ry in range(tw.height):
-        wy = oy + ry
-        row = ""
-        for rx in range(tw.width):
-            wx = ox + rx
-            dx = wx - pcx
-            dy = wy - feet_y
-            if dx in (0, 1) and dy >= -2 and dy <= 0:
-                row += "@"
-                continue
-            if surface.get(wx) == wy:
-                row += "^"
-                continue
-            t = tw.tile_at(wx, wy)
-            if t is None:
-                row += "?"
-            elif t.lava:
-                row += "L"
-            elif t.water:
-                row += "~"
-            elif t.platform:
-                row += "="
-            elif t.solid:
-                row += "#"
-            else:
-                row += "."
-        rows.append(f"{wy:4d} {row}")
-    print(f"[地图] pos=({pcx},{feet_y}) (@=玩家, ^=落脚点, #=solid)")
-    for row in rows:
-        print(row)
-
-
-def _handle_stuck(state, controller=None, perception=None, stuck_flag=None) -> bool:
-    from terraria_agent.cerebellum.terra_blind_client import scan_surface
-    p = state.player
-    tw = state.tile_window
-    pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
-    feet_y = int((p.pos[1] + p.height) / 16.0)
-    sign = 1 if p.direction == "right" else -1
-    surface = scan_surface(tw) if tw else {}
-    surf = []
-    for i in range(1, 16):
-        cx = pcx + sign * i
-        sy = surface.get(cx)
-        surf.append(sy - feet_y if sy is not None else "?")
-    overhead_clear = _overhead_clear(state)
-    shallow = _overhead_shallow(state)
-    print(f"[卡住诊断] pos=({pcx},{feet_y}) dir={p.direction} overhead_clear={overhead_clear} shallow={shallow}")
-    print(f"[卡住诊断] 前方地表相对高度: {surf}")
-    if state.terrain_scan:
-        ts = state.terrain_scan
-        print(f"[卡住诊断] terrain={ts.terrain_type.value} dist={ts.distance_tiles} size={ts.depth_or_height}")
-    print_surface_map(state)
-    deep = _overhead_deep(state)
-    if shallow and controller is not None and perception is not None:
-        import threading as _threading
-        if stuck_flag is not None:
-            stuck_flag[0] = True
-        dir_name = p.direction
-        if deep:
-            print(f"[卡住] 头顶方块 >3 格，后退找空地 + pillar_jump...")
-            def _retreat_jump_worker():
-                import time as _time
-                try:
-                    back = "left" if dir_name == "right" else "right"
-                    for _ in range(60):
-                        controller._post_control({back: True})
-                        _time.sleep(0.1)
-                        s = perception.detect(frame=None)
-                        if s and _overhead_clear(s):
-                            break
-                    controller._post_control({})
-                    jump_frames = _load_skill_frames("pillar_jump_2_height")
-                    if not jump_frames:
-                        return
-                    if dir_name == "left":
-                        jump_frames = [_mirror_frame(f) for f in jump_frames]
-                    print(f"[卡住] 头顶已清，反复 pillar_jump_2_height 向{dir_name}...")
-                    for _ in range(10):
-                        controller.replay_skill(jump_frames)
-                        _time.sleep(len(jump_frames) / 60.0)
-                finally:
-                    if stuck_flag is not None:
-                        stuck_flag[0] = False
-            _threading.Thread(target=_retreat_jump_worker, daemon=True).start()
-        else:
-            print(f"[卡住] 头顶 ≤3 格方块，向上挖掘...")
-            dig_frames = (
-                [{"use_item": True, "sc": 1, "selected_slot": 1, "mx": 0, "my": -5, "jump": True}] * 15 +
-                [{"use_item": True, "sc": 1, "selected_slot": 1, "mx": 0, "my": -5}] * 15
-            )
-            def _dig_up_worker():
-                import time as _time
-                try:
-                    cleared = False
-                    for _ in range(10):
-                        controller.replay_skill(dig_frames)
-                        _time.sleep(len(dig_frames) / 60.0)
-                        s = perception.detect(frame=None)
-                        if s and _overhead_clear(s):
-                            cleared = True
-                            break
-                    if cleared:
-                        frames = _load_skill_frames(f"big_pillar_jump_{dir_name}")
-                        if frames:
-                            print(f"[卡住] 挖穿，触发 big_pillar_jump_{dir_name}")
-                            controller.replay_skill(frames)
-                    else:
-                        print(f"[卡住] 挖掘失败，放弃")
-                finally:
-                    if stuck_flag is not None:
-                        stuck_flag[0] = False
-            _threading.Thread(target=_dig_up_worker, daemon=True).start()
-        return True
-    return False
-
 
 def _safety_interrupt(state, controller) -> None:
     p = state.player
@@ -407,7 +216,6 @@ def run() -> None:
     llm = LLMClient()
     tactician = Tactician()
     trigger = TriggerDetector()
-    _stuck_handling = [False]
     goal_exec = GoalExecutor(controller)
     explore_nav = NavClient()
     print("[agent] 启动 — ctrl+c 停止")
@@ -452,9 +260,6 @@ def run() -> None:
         else:
             reason = result.split(":", 1)[-1] if ":" in result else result
             _pending_context.append(f"{goal}失败:{reason}")
-        if "stuck" in result:
-            fresh = perception.detect(frame=None)
-            _handle_stuck(fresh, controller, perception, _stuck_handling)
         deadline = 0.0
 
     def _start_goal(goal_name: str, target: dict, timeout: float) -> None:
@@ -500,10 +305,6 @@ def run() -> None:
         if state.player.hp == 0:
             print("[agent] 等待游戏状态...")
             time.sleep(2.0)
-            continue
-
-        if _stuck_handling[0]:
-            time.sleep(_EXEC_TICK)
             continue
 
         if state.biome and (not visited_biomes or visited_biomes[-1] != state.biome):
@@ -599,9 +400,6 @@ def run() -> None:
                     nav_status = f"failed:{lr.reason}" if lr and lr.status == "failed" else "idle"
                 state_text += f"\nnav_status={nav_status}"
                 print(f"[触发:{trigger_reason}]")
-                if trigger_reason == "卡住":
-                    if _handle_stuck(state, controller, perception, _stuck_handling):
-                        continue
                 llm_thread = threading.Thread(
                     target=llm_worker, args=(state_text, trigger_reason), daemon=True
                 )
@@ -651,7 +449,7 @@ def run() -> None:
                 continue
             else:
                 actions = [GameAction(action=ActionType.NONE)]
-        elif not goal_exec.active and not _stuck_handling[0]:
+        elif not goal_exec.active:
             # free exploration: keep a long-range sentinel goal in the explore direction;
             # mod's segmented nav handles the actual movement. Flip direction if it fails.
             p = state.player
