@@ -441,11 +441,11 @@ def run() -> None:
                           for k in fresh.inventory if fresh.inventory.get(k, 0) > _inv_before[0].get(k, 0)}
                 print(f"[tree] 砍完第{_trees_chopped[0]}棵 gained={gained}")
                 _pending_context.append(f"{goal}成功，获得:{gained}" if gained else f"{goal}成功")
+                wood = fresh.inventory.get("木材", 0)
+                if wood >= 2:
+                    r = controller.craft(item_id=94, amount=wood * 2)
+                    print(f"[tree] 制作木平台 wood={wood}: {r}")
                 organize_hotbar(fresh.inventory_slots)
-                if _trees_chopped[0] >= _TREE_CHOP_LIMIT:
-                    r = controller.craft(item_id=94, amount=50)
-                    print(f"[tree] 自动制作木平台: {r}")
-                    organize_hotbar(fresh.inventory_slots)
             else:
                 _pending_context.append(f"{goal}成功")
         else:
