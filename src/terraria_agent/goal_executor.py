@@ -121,8 +121,8 @@ class GoalExecutor:
             self._nav.stop()
             if self._phase != "chopping":
                 self._phase = "chopping"
-                tx = int((obj.pos[0] + _TILE) / _TILE)
-                ty = int((obj.pos[1] + obj.height / 2.0 * _TILE) / _TILE)
+                tx = int(obj.pos[0] / _TILE)
+                ty = int(obj.pos[1] / _TILE) + obj.height - 1
                 self._ctrl._http_fire(
                     "http://127.0.0.1:17878/item_use",
                     body={"target_wx": tx, "target_wy": ty, "slot": -1, "duration_ticks": 0},
