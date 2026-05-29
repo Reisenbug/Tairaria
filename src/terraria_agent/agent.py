@@ -426,7 +426,7 @@ def run() -> None:
     _prev_overhead: bool = False
     _fight_deadline: float = 0.0
     _trees_chopped = [0]
-    _TREE_CHOP_LIMIT = 2
+    _TREE_CHOP_LIMIT = 0  # 测试期间禁用自动砍树
     _last_goal: list = [None]
     _inv_before: list = [{}]
 
@@ -519,8 +519,7 @@ def run() -> None:
             elif "左" in goal or "left" in goal.lower():
                 _explore_direction = "left"
 
-        cur_tool_weapon = {s.slot_index for s in state.inventory_slots
-                           if not s.is_empty and (s.is_weapon or s.is_axe or s.is_pickaxe)}
+        cur_tool_weapon = {(s.slot_index, s.name) for s in state.inventory_slots if not s.is_empty}
         if cur_tool_weapon - _prev_tool_weapon_slots:
             organize_hotbar(state.inventory_slots)
         _prev_tool_weapon_slots = cur_tool_weapon
