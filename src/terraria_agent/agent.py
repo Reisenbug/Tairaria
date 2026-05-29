@@ -487,6 +487,12 @@ def run() -> None:
     _cave_bypass_active = [False]
     _explore_direction: str = "right"
 
+    import signal as _signal
+    def _sigint(sig, frame):
+        _cleanup(controller, goal_exec, explore_nav)
+        raise SystemExit(0)
+    _signal.signal(_signal.SIGINT, _sigint)
+
     while True:
         now = time.time()
         state = perception.detect(frame=None)
@@ -673,6 +679,17 @@ def run() -> None:
         controller.execute(actions)
 
         time.sleep(_EXEC_TICK)
+
+
+def _cleanup(controller, goal_exec, explore_nav) -> None:
+    try:
+        goal_exec.cancel()
+        explore_nav.stop()
+        controller._http_fire("http://127.0.0.1:17878/item_use_stop")
+        controller._http_fire("http://127.0.0.1:17878/nav_stop")
+        controller.release_all()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
