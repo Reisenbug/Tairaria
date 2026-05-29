@@ -123,9 +123,16 @@ class ModController:
         except Exception as e:
             diag("http_post", f"FAIL url={url} err={type(e).__name__}:{e}")
 
-    def _http_fire(self, url: str) -> None:
+    def _http_fire(self, url: str, body: dict | None = None) -> None:
         try:
-            with _OPENER.open(url, timeout=0.5) as resp:
-                resp.read()
+            import json as _json, urllib.request as _req
+            if body is not None:
+                data = _json.dumps(body).encode()
+                r = _req.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+                with _OPENER.open(r, timeout=0.5) as resp:
+                    resp.read()
+            else:
+                with _OPENER.open(url, timeout=0.5) as resp:
+                    resp.read()
         except Exception:
             pass

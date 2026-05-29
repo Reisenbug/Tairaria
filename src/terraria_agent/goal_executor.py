@@ -119,19 +119,15 @@ class GoalExecutor:
 
         if self._dist_to(obj, state) <= _ARRIVE_DIST:
             self._nav.stop()
-            self._phase = "chopping"
-            axe_slot = next((s.slot_index for s in state.inventory_slots[:10] if s.is_axe), None)
-            p = state.player
-            pcx = p.pos[0] + p.width / 2.0
-            pcy = p.pos[1] + p.height / 2.0
-            tcx = obj.pos[0] + _TILE
-            tcy = obj.pos[1] + obj.height * _TILE
-            mx = (tcx - pcx) / _TILE
-            my = (tcy - pcy) / _TILE
-            ctrl = {"use_item": True, "sc": 1, "mx": mx, "my": my}
-            if axe_slot is not None:
-                ctrl["selected_slot"] = axe_slot
-            return ctrl
+            if self._phase != "chopping":
+                self._phase = "chopping"
+                tx = int((obj.pos[0] + _TILE) / _TILE)
+                ty = int((obj.pos[1] + obj.height / 2.0 * _TILE) / _TILE)
+                self._ctrl._http_fire(
+                    "http://127.0.0.1:17878/item_use",
+                    body={"target_wx": tx, "target_wy": ty, "slot": -1, "duration_ticks": 0},
+                )
+            return {}
         return self._navigate_to_obj(obj, state)
 
     def _find_nearest(self, obj_type: str, state: GameState, min_height: int = 0):
@@ -197,6 +193,7 @@ class GoalExecutor:
         self._phase = ""
         self._nav.stop()
         self._nav_target = None
+        self._ctrl._http_fire("http://127.0.0.1:17878/item_use_stop")
         self._ctrl.release_all()
         if self._on_done:
             self._on_done(f"{goal}:{reason}")
