@@ -529,6 +529,7 @@ def run() -> None:
                 duration = float(decision.get("持续秒数", _DEFAULT_DEADLINE))
                 goal_name = decision.get("goal")
                 skill_name = decision.get("skill") if not goal_name else None
+                ctrl = None
                 if goal_name and not goal_exec.active:
                     target = decision.get("target", {})
                     timeout = float(decision.get("timeout", 15.0))
