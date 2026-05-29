@@ -311,16 +311,17 @@ def print_surface_map(state) -> None:
 
 
 def _handle_stuck(state, controller=None, perception=None, stuck_flag=None) -> bool:
-    from terraria_agent.pit_detector import _surface_y
+    from terraria_agent.cerebellum.terra_blind_client import scan_surface
     p = state.player
     tw = state.tile_window
     pcx = int((p.pos[0] + p.width / 2.0) / 16.0)
     feet_y = int((p.pos[1] + p.height) / 16.0)
     sign = 1 if p.direction == "right" else -1
+    surface = scan_surface(tw) if tw else {}
     surf = []
     for i in range(1, 16):
         cx = pcx + sign * i
-        sy = _surface_y(tw, cx, feet_y - 1) if tw else None
+        sy = surface.get(cx)
         surf.append(sy - feet_y if sy is not None else "?")
     overhead_clear = _overhead_clear(state)
     shallow = _overhead_shallow(state)
