@@ -10,6 +10,9 @@ from terraria_agent.cerebellum.nav_client import NavClient
 
 _TILE = 16.0
 _ARRIVE_DIST = 3.0
+# abandon a chest goal when the surface path requires digging more than this many tiles.
+# the chest is buried too deep to be worth detouring for during surface exploration.
+_CHEST_MAX_MINE_TILES = 20
 
 
 class GoalExecutor:
@@ -24,6 +27,8 @@ class GoalExecutor:
         self._phase: str = ""
         # tile the current nav was launched toward; None means we haven't started yet
         self._nav_target: tuple[int, int] | None = None
+        # set once we've run the pre-flight dig-cost probe for the current chest goal
+        self._cost_probed: bool = False
 
     @property
     def active(self) -> bool:
@@ -37,6 +42,7 @@ class GoalExecutor:
         self._on_done = on_done
         self._phase = "navigate"
         self._nav_target = None
+        self._cost_probed = False
         print(f"[goal] 开始 {goal} target={target} timeout={timeout}s")
 
     def cancel(self) -> None:
@@ -89,6 +95,17 @@ class GoalExecutor:
             return {}
         if self._target_abs_x is None:
             self._target_abs_x = obj.pos[0]
+
+        if not self._cost_probed:
+            self._cost_probed = True
+            gx = int((obj.pos[0] + _TILE) / _TILE)
+            p = state.player
+            gy = int((p.pos[1] + p.height) / _TILE)
+            mine_tiles = self._nav.probe_mine_tiles(gx, gy)
+            if mine_tiles > _CHEST_MAX_MINE_TILES:
+                print(f"[goal] open_chest 放弃：需挖掘 {mine_tiles} 格 > {_CHEST_MAX_MINE_TILES}")
+                self._finish("nav_too_much_digging")
+                return {}
 
         if self._dist_to(obj, state) <= _ARRIVE_DIST:
             self._nav.stop()

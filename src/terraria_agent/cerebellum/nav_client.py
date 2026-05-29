@@ -108,6 +108,19 @@ class NavClient:
     def last_result(self) -> Optional[NavResult]:
         return self._last_result
 
+    def probe_mine_tiles(self, gx: int, gy: int, radius: int = 40) -> int:
+        """One-shot full plan to (gx,gy); return total tiles that must be mined.
+
+        Returns -1 if planning failed (no path / error). Does not start navigation.
+        Used to abandon goals that require excessive digging before committing.
+        """
+        r = _http("POST", "/debug_segment_plan", {"gx": gx, "gy": gy, "radius": radius})
+        path = r.get("path")
+        if not path:
+            return -1
+        return sum(len(n.get("mine_tiles", [])) for n in path
+                   if str(n.get("action", "")).startswith("mine_"))
+
     def start(self, gx: int, gy: int, player_tile: tuple[int, int] | None = None) -> NavResult:
         """Start nav to (gx, gy). Returns initial NavResult.
 
