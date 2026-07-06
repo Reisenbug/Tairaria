@@ -13,7 +13,9 @@ Config: SECOND_PLAYER_API_URL / SECOND_PLAYER_MODEL / SECOND_PLAYER_API_KEY in .
 import html
 import json
 import os
+import queue
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -21,6 +23,7 @@ import urllib.request
 
 from dotenv import load_dotenv
 from openai import OpenAI
+from websockets.sync.client import connect as ws_connect
 
 load_dotenv()
 
@@ -68,6 +71,70 @@ def say(text):
     mod_post("/say", {"text": text})
 
 
+# ---------------- event channel (game ↔ agent, WebSocket on /ws) ----------------
+# The mod pushes events (player chat, nav_done, ...) so we react instantly instead of polling.
+# Bidirectional: ws_send() can push low-latency messages back to the game (e.g. interrupts) without
+# an HTTP round-trip. A background thread holds the connection and drops parsed events into _events;
+# instructions are split into _instructions for next_instruction().
+WS_URL = MOD.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
+_events = queue.Queue()
+_instructions = queue.Queue()
+_ws = None            # live connection for ws_send()
+_ws_lock = threading.Lock()
+
+
+def ws_send(type_, data=None):
+    """Push a message game-ward over the WebSocket (agent → game). Best-effort."""
+    with _ws_lock:
+        if _ws is None:
+            return False
+        try:
+            _ws.send(json.dumps({"type": type_, "data": data or {}}))
+            return True
+        except Exception:
+            return False
+
+
+def _ws_listener():
+    global _ws
+    while True:
+        try:
+            with ws_connect(WS_URL, open_timeout=10) as sock:
+                with _ws_lock:
+                    _ws = sock
+                print("[ws] connected")
+                for raw in sock:
+                    try:
+                        ev = json.loads(raw)
+                    except Exception:
+                        continue
+                    et = ev.get("type")
+                    if et == "hello":
+                        continue
+                    if et == "instruction":
+                        txt = ev.get("data", {}).get("text")
+                        if txt:
+                            _instructions.put(txt)
+                    _events.put(ev)
+        except Exception as e:
+            print(f"[ws] disconnected ({e}), retrying...")
+        finally:
+            with _ws_lock:
+                _ws = None
+        time.sleep(2)
+
+
+def drain_events():
+    """Non-blocking: return and clear all non-instruction events seen since last call."""
+    out = []
+    while True:
+        try:
+            out.append(_events.get_nowait())
+        except queue.Empty:
+            break
+    return out
+
+
 # ---------------- Terraria Wiki (terraria.wiki.gg MediaWiki API) ----------------
 WIKI = "https://terraria.wiki.gg/api.php"
 
@@ -102,18 +169,25 @@ def wiki_page(title, max_chars=3500):
 
 
 def next_instruction(block=False):
-    """Return the next queued /tb text, or None. If block=True, wait until one arrives."""
+    """Next /tb text, or None. Prefers the WS-pushed queue; falls back to HTTP /instruction poll
+    so a dropped WS connection never loses commands. If block=True, wait until one arrives."""
     while True:
         try:
-            ins = mod_get("/instruction").get("instruction")
+            return _instructions.get_nowait()   # instant, pushed via WebSocket
+        except queue.Empty:
+            pass
+        try:
+            ins = mod_get("/instruction").get("instruction")   # fallback / catch anything SSE missed
         except Exception:
             ins = None
         if ins:
-            print(f"[instruction] {ins}")
             return ins
         if not block:
             return None
-        time.sleep(POLL_S)
+        try:
+            return _instructions.get(timeout=POLL_S)   # block on the pushed queue
+        except queue.Empty:
+            continue
 
 
 # ---------------- tools ----------------
@@ -206,7 +280,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "use_item",
-        "description": "对着一个格坐标使用背包里某个槽位的道具——**一步完成**:自动切到那个槽位+瞄准该格+使用。镐子挖、剑砍、放置方块、扔炸弹、用魔杖、喝药水都走这个。不需要先'切槽位'再'用',这一个调用就干完了。slot=物品栏槽位号(0-based,见 get_state 的 inventory)。扔炸弹到脚下就是 x,y=脚下格、slot=炸弹槽位。道具有射程,先站近。",
+        "description": "对着一个格坐标使用背包里某个槽位的道具——**一步完成**:自动切到那个槽位+瞄准该格+使用。镐子挖、剑砍、放置方块、扔炸弹、用魔杖、喝药水都走这个。不需要先'切槽位'再'用',这一个调用就干完了。slot=物品的槽位号(直接抄 get_state 的 items 里那个物品的 slot 字段)。扔炸弹到脚下就是 x,y=脚下格、slot=炸弹的slot。道具有射程,先站近。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -281,7 +355,7 @@ TOOLS = [
 
 def run_tool(name, args):
     if name == "get_state":
-        return json.dumps(mod_get("/state"))
+        return json.dumps(mod_get("/state"), ensure_ascii=False)
     if name == "wiki_search":
         try:
             return json.dumps({"results": wiki_search(args["query"])}, ensure_ascii=False)
@@ -377,33 +451,18 @@ def run_tool(name, args):
 
 # ---------------- agent loop ----------------
 
-SYSTEM = """你是 TB,Terraria 世界里的 AI 二号玩家,和人类玩家搭档。你是一个 agent:接到目标后自己
-分解、执行、遇到疑问就问玩家、拿到答案继续,直到把事办成。不是一问一答的机器人。
+SYSTEM = """你是 TB,Terraria 里的 AI 二号玩家,和人类搭档。接到目标就自己分解、执行、有疑问问玩家、
+拿答案继续,直到办成。你看不到画面,感官和手都是工具。
 
-你看不到画面。你的感官和手就是工具。玩家在聊天里给你目标,你执行并回话。
+行为:
+- 说中文,简短,像队友。你的动作玩家看不见,用 say 边干边说:开始/关键进展/完成/失败各说一句。
+- 拿不准就用 ask 问玩家(目标模糊、要拍板),拿到答案继续。同名或陌生物品先 item_info 查清楚再决定。
+- 想清楚就动手,别空转。use_item 一步完成切槽+瞄准+使用。
+- 寻路或动作失败,如实告诉玩家原因,提替代方案。
+- 玩家能随时打断:工具返回 status=interrupted 时,先回应玩家的话,再按新意思决定继续/改向/干别的。
 
-核心规则:
-- 说中文,简短,像队友。玩家看不到你的任何动作,不说就等于没发生。
-- **边干边说**:调用寻路/挖掘这类耗时工具前先说一句要干嘛,拿到关键结果再说一句。装高手一言不发是大忌。
-- **有疑问直接用 ask 问玩家,然后继续**。ask 会阻塞等玩家回答,回答回来你接着干,任务不断。
-  该问就问(目标模糊、要玩家拍板),别瞎猜;但也别为了省事把简单决定丢给玩家。
-- **别原地反复 get_state 空转**。同名/看不懂的物品用 item_info 查描述,别反复问玩家"你指哪个"。
-  想清楚了就直接动手——use_item 一步就能切槽+瞄准+使用,不存在"先切槽再用"这种中间步骤。
-- get_state 位置是像素,除以16是格坐标;所有工具坐标都用格坐标。
-- 寻路失败(walled_in/loop_unresolved/timeout)要用人话告诉玩家原因并提替代方案。绝不假装成功。
-- **玩家随时能打断你**:寻路走到一半玩家发了新话,nav_to 会立刻停下并返回
-  status=interrupted + player_said(玩家的话)+ stopped_at_px(停在哪)。这时先回应玩家那句话,
-  按新意思重新决定:继续走原目标、改目标、还是干别的。别无视玩家的打断继续闷头走。
-
-找地形(比如"去丛林"):整张地图可读,别盲走探索。用 find_biome(name) 拿到丛林中心坐标,
-再 nav_to 过去。支持 jungle/snow/desert/dungeon/corruption/crimson/hallow。
-
-找方块:先用 tile_names(关键词) 查准确的 TileID 名,再用 find_tiles(那个名) 找位置——别猜名字。
-地下的东西(生命水晶等)半径要给大(max_dist 800+),够不到就加大或先往地下走一段再找。
-
-**你自己的 Terraria 记忆不可靠,别凭记忆报配方/掉落/数值/召唤条件**——这些一律用 wiki_search + wiki_page
-从官方 wiki 查准。策略性的东西(大方向怎么打)可以自己想,但具体事实必须查。
-按步骤干:查状态 → (需要知识就查 wiki) → 定位目标 → 寻路 → 行动 → 验证。
+知识:你的 Terraria 记忆不可靠。配方、掉落、数值、召唤条件一律 wiki_search + wiki_page 查官方 wiki。
+只有"大方向怎么打"这类策略可以自己想。
 """
 
 
@@ -458,6 +517,35 @@ def run_plan(goal, subtasks):
     say("整个目标都办完了。")
 
 
+# tool results that are large and only matter fresh — old copies get stubbed out of the sent history
+# so token usage doesn't balloon (a full get_state is several KB; 3 of them in history = huge input).
+_BULKY_TOOLS = {"get_state", "find_tiles", "wiki_page", "item_info"}
+_STUB = "[旧结果已省略,需要就重新查]"
+
+
+def compact_for_send(history):
+    """Return a copy of history where every BULKY tool result EXCEPT the last one is stubbed. The model
+    only needs the freshest state; stale multi-KB blobs are pure token cost."""
+    # map assistant tool_call_id -> tool name, to know which tool results are bulky
+    id2name = {}
+    for m in history:
+        for tc in (m.get("tool_calls") or []):
+            id2name[tc["id"]] = tc["function"]["name"]
+    # find the last bulky tool-result index (keep that one intact)
+    last_bulky = -1
+    for i, m in enumerate(history):
+        if m.get("role") == "tool" and id2name.get(m.get("tool_call_id")) in _BULKY_TOOLS:
+            last_bulky = i
+    out = []
+    for i, m in enumerate(history):
+        if (m.get("role") == "tool" and i != last_bulky
+                and id2name.get(m.get("tool_call_id")) in _BULKY_TOOLS):
+            out.append({**m, "content": _STUB})
+        else:
+            out.append(m)
+    return out
+
+
 def run_task(history):
     """Drive the tool loop until the model stops calling tools (task done). ask() may block inside.
     Returns True if a player interruption bubbled up (caller should stop the plan)."""
@@ -467,7 +555,7 @@ def run_task(history):
             print("[llm] calling...")
             resp = client.chat.completions.create(
                 model=MODEL,
-                messages=[{"role": "system", "content": SYSTEM}] + history,
+                messages=[{"role": "system", "content": SYSTEM}] + compact_for_send(history),
                 tools=TOOLS,
             )
             print(f"[llm] {time.monotonic() - t0:.1f}s")
@@ -507,6 +595,7 @@ def run_task(history):
 
 def main():
     print(f"second_player up — model={MODEL} api={API_URL} mod={MOD}")
+    threading.Thread(target=_ws_listener, daemon=True).start()   # game↔agent event channel
     history = []
     greeted = False
     while True:

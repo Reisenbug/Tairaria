@@ -1,0 +1,43 @@
+{
+  "smart_cursor": false,
+  "frames": [
+    {
+      "sc": 1,
+      "slot": 0,
+      "mx": 3.2,
+      "my": -3.4,
+      "repeat": 36
+    },
+    {
+      "jump": true,
+      "sc": 1,
+      "slot": 0,
+      "mx": 3.2,
+      "my": -3.4,
+      "repeat": 6
+    },
+    {
+      "right": true,
+      "jump": true,
+      "sc": 1,
+      "slot": 0,
+      "mx": 3.2,
+      "my": -3.4,
+      "repeat": 21
+    },
+    {
+      "jump": true,
+      "sc": 1,
+      "slot": 0,
+      "mx": 3.1,
+      "my": -3.4
+    },
+    {
+      "sc": 1,
+      "slot": 0,
+      "mx": 3.2,
+      "my": -3.4,
+      "repeat": 37
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "smart_cursor": false,
+  "frames": [
+    {
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 3.2,
+      "repeat": 39
+    },
+    {
+      "down": true,
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 3.2,
+      "repeat": 3
+    },
+    {
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 3.2,
+      "repeat": 8
+    },
+    {
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 2.9
+    },
+    {
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 3.2,
+      "repeat": 16
+    },
+    {
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 2.6
+    },
+    {
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 3.2,
+      "repeat": 7
+    },
+    {
+      "use_item": true,
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 3.2
+    },
+    {
+      "use_item": true,
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 2.6
+    },
+    {
+      "use_item": true,
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 3.2,
+      "repeat": 3
+    },
+    {
+      "sc": 0,
+      "slot": 2,
+      "mx": -0.6,
+      "my": 3.2,
+      "repeat": 81
+    }
+  ]
+}
