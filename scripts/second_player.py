@@ -10,10 +10,13 @@ Config: SECOND_PLAYER_API_URL / SECOND_PLAYER_MODEL / SECOND_PLAYER_API_KEY in .
         falling back to COMMANDER_* (same convention as llm_client.py).
 """
 
+import html
 import json
 import os
+import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from dotenv import load_dotenv
@@ -24,6 +27,7 @@ load_dotenv()
 MOD = "http://127.0.0.1:17878"
 POLL_S = 1.0
 NAV_TIMEOUT_S = 240
+NAV_REPORT_S = 12       # progress-note cadence while walking
 MAX_TURNS = 60          # tool-loop turns per task (runaway guard)
 HISTORY_MAX_MSGS = 80   # rolling conversation memory across tasks
 
@@ -64,6 +68,39 @@ def say(text):
     mod_post("/say", {"text": text})
 
 
+# ---------------- Terraria Wiki (terraria.wiki.gg MediaWiki API) ----------------
+WIKI = "https://terraria.wiki.gg/api.php"
+
+
+def _wiki_get(params):
+    # external host: use the default opener (honours system proxy), NOT the mod's no-proxy opener
+    url = WIKI + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": "TerraBlind-agent/1.0"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.loads(r.read().decode())
+
+
+def wiki_search(query, limit=5):
+    d = _wiki_get({"action": "query", "list": "search", "srsearch": query,
+                   "srlimit": limit, "format": "json"})
+    return [{"title": s["title"], "snippet": re.sub(r"<[^>]+>", "", s["snippet"])}
+            for s in d.get("query", {}).get("search", [])]
+
+
+def wiki_page(title, max_chars=3500):
+    d = _wiki_get({"action": "parse", "page": title, "prop": "text", "format": "json",
+                   "disablelimitreport": 1, "disableeditsection": 1, "redirects": 1})
+    if "parse" not in d:
+        return {"error": "not_found", "title": title}
+    h = d["parse"]["text"]["*"]
+    h = re.sub(r"<style.*?</style>", "", h, flags=re.S)
+    t = re.sub(r"<[^>]+>", " ", h)
+    t = html.unescape(t)
+    t = re.sub(r"\[\s*edit\s*\]", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return {"title": d["parse"]["title"], "text": t[:max_chars]}
+
+
 def next_instruction(block=False):
     """Return the next queued /tb text, or None. If block=True, wait until one arrives."""
     while True:
@@ -88,6 +125,35 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {}},
     }},
     {"type": "function", "function": {
+        "name": "wiki_search",
+        "description": "搜 Terraria 官方 wiki(terraria.wiki.gg),返回匹配的页面标题+摘要。**不确定的游戏知识一律查 wiki,别凭记忆瞎说**——配方、掉落、boss 召唤条件、物品用途、进度门槛都查。查到标题后用 wiki_page 读正文。",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "搜索词(英文最准,如 'King Slime' / 'Hellstone Bar')"}},
+            "required": ["query"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "wiki_page",
+        "description": "读 Terraria wiki 某个页面的正文(纯文本,含数据表如掉落率/伤害/配方)。title 用 wiki_search 返回的准确标题。",
+        "parameters": {
+            "type": "object",
+            "properties": {"title": {"type": "string", "description": "页面标题(准确,如 'King Slime')"}},
+            "required": ["title"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "item_info",
+        "description": "查背包里某个物品的详细信息(描述tooltip + 类型标志:武器伤害/镐力/放置物createTile/是否消耗品/回血等)。**同名或看不懂的物品别猜别反复问玩家,用这个查一眼就懂**(比如 BOMB 召唤妖精 vs 炸弹摧毁图格,靠 tooltip 分清)。给 slot(槽位号)或 name(物品名)。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "slot": {"type": "integer", "description": "物品栏槽位号(0-based)"},
+                "name": {"type": "string", "description": "物品名(和 slot 二选一)"},
+            },
+        },
+    }},
+    {"type": "function", "function": {
         "name": "find_biome",
         "description": "整张地图可读,所以'找丛林/雪地/地牢'不是探索问题,是查询问题。给一个 biome 名,返回它的中心可站坐标 {found,x,y,count}。支持:jungle/snow/desert/dungeon/corruption/crimson/hallow。找到坐标后直接 nav_to 过去。",
         "parameters": {
@@ -106,7 +172,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "find_tiles",
-        "description": "在玩家周围找最近的某类方块,按距离排序返回格坐标。name 用原版 TileID 精确名,如 Iron/Copper/Gold/Silver/Demonite/Containers(箱子)/Trees/Hellstone。找 Containers 时每个结果会带 kind 字段(箱子种类名,如 Chest=木箱/Gold Chest/Ice Chest…);要'最近的木箱'就找 Containers 再挑 kind 是木箱(Chest)的最近一个。找到箱子后 nav_to 到旁边再 interact 开箱。",
+        "description": "在玩家周围找最近的某类方块,按距离排序返回格坐标。name 用原版 TileID 精确名(不确定就先 tile_names 查)。找 Containers(箱子)时每个结果带 kind 字段(箱子种类名,如 Chest=普通木箱/Gold Chest/Ivy Chest 常春藤箱/Ice Chest…)。**要特定种类的箱子时,把 n 设大(比如20),从返回列表里筛出 kind 匹配的那个再挑最近**——因为按距离排序时想要的种类可能排在很多其他箱子后面,n 太小会漏掉。找到后 nav_to 到旁边再 interact 开箱。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -140,7 +206,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "use_item",
-        "description": "对着一个格坐标使用背包里某个槽位的道具(镐子挖、剑砍、放置物、药水、魔杖等都走这个)。slot 是物品栏槽位号(0-based,见 get_state 的 inventory)。先确认自己站得离目标够近(道具有射程)。",
+        "description": "对着一个格坐标使用背包里某个槽位的道具——**一步完成**:自动切到那个槽位+瞄准该格+使用。镐子挖、剑砍、放置方块、扔炸弹、用魔杖、喝药水都走这个。不需要先'切槽位'再'用',这一个调用就干完了。slot=物品栏槽位号(0-based,见 get_state 的 inventory)。扔炸弹到脚下就是 x,y=脚下格、slot=炸弹槽位。道具有射程,先站近。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -162,6 +228,34 @@ TOOLS = [
                 "y": {"type": "integer", "description": "方块格y"},
             },
             "required": ["x", "y"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "fight",
+        "description": "用当前手持武器持续攻击附近最近的敌人(max_dist 格内自动锁定、追打)。打怪本质就是这个。先确保手上拿的是武器(get_state 看 selected_slot / 用 use_item 前先切槽)。这个工具会阻塞打一阵子并报告,期间玩家也能打断。清场或没敌人了就会停。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "max_dist": {"type": "integer", "description": "锁敌半径(格),默认25"},
+                "seconds": {"type": "number", "description": "打多久(秒),默认10;还有敌人可以再调一次"},
+            },
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "loot_all",
+        "description": "把当前【已打开】的箱子里的东西全部掏进背包。必须先 interact 开箱,再 loot_all。",
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "craft",
+        "description": "合成一个物品(按名字)。需要站在对应工作台/熔炉旁边、材料足够,否则失败。失败时会返回当前能合成的物品列表(available_names),据此判断缺工作台还是缺材料。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "物品名(英文,如 'Iron Pickaxe')"},
+                "amount": {"type": "integer", "description": "数量,默认1"},
+            },
+            "required": ["name"],
         },
     }},
     {"type": "function", "function": {
@@ -188,6 +282,23 @@ TOOLS = [
 def run_tool(name, args):
     if name == "get_state":
         return json.dumps(mod_get("/state"))
+    if name == "wiki_search":
+        try:
+            return json.dumps({"results": wiki_search(args["query"])}, ensure_ascii=False)
+        except Exception as e:
+            return json.dumps({"error": f"wiki_unreachable: {e}"})
+    if name == "wiki_page":
+        try:
+            return json.dumps(wiki_page(args["title"]), ensure_ascii=False)
+        except Exception as e:
+            return json.dumps({"error": f"wiki_unreachable: {e}"})
+    if name == "item_info":
+        payload = {}
+        if "slot" in args:
+            payload["slot"] = args["slot"]
+        if "name" in args:
+            payload["name"] = args["name"]
+        return json.dumps(mod_post("/item_info", payload))
     if name == "find_biome":
         return json.dumps(mod_post("/find_biome", {"name": args["name"]}))
     if name == "tile_names":
@@ -200,11 +311,30 @@ def run_tool(name, args):
         if not r.get("ok"):
             return json.dumps(r)
         deadline = time.monotonic() + NAV_TIMEOUT_S
+        last_report = time.monotonic()
         while time.monotonic() < deadline:
             time.sleep(0.5)
+            # INTERRUPTIBLE: a new /tb while walking means the player wants to intervene.
+            # Stop nav, hand the interruption + where-we-stopped back to the LLM to re-decide.
+            interrupt = next_instruction(block=False)
+            if interrupt:
+                mod_post("/nav_recede_stop", {})
+                st = mod_get("/state")
+                pos = st.get("player", {}).get("pos", {})
+                return json.dumps({"done": False, "status": "interrupted",
+                                   "player_said": interrupt,
+                                   "stopped_at_px": pos})
             d = mod_get("/nav_recede_done")
             if d.get("done") or d.get("status") == "failed":
                 return json.dumps(d)
+            # periodic progress note so the player isn't staring at a black screen
+            if time.monotonic() - last_report >= NAV_REPORT_S:
+                last_report = time.monotonic()
+                st = mod_get("/state")
+                pos = st.get("player", {}).get("pos", {})
+                px, py = pos.get("x", 0) / 16, pos.get("y", 0) / 16
+                dist = abs(px - args["x"]) + abs(py - args["y"])
+                say(f"还在走,离目标还有约{int(dist)}格。")
         mod_post("/nav_recede_stop", {})
         return json.dumps({"done": False, "status": "timeout"})
     if name == "mine":
@@ -216,6 +346,25 @@ def run_tool(name, args):
             "slot": args["slot"], "duration_ticks": args.get("duration_ticks", 30)}))
     if name == "interact":
         return json.dumps(mod_post("/interact", {"tile_x": args["x"], "tile_y": args["y"]}))
+    if name == "fight":
+        max_dist = args.get("max_dist", 25)
+        secs = float(args.get("seconds", 10))
+        mod_post("/fight", {"max_dist": max_dist})
+        deadline = time.monotonic() + secs
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            interrupt = next_instruction(block=False)
+            if interrupt:
+                mod_post("/fight", {"active": False})
+                return json.dumps({"status": "interrupted", "player_said": interrupt})
+            if not mod_get("/fight_active").get("active"):
+                return json.dumps({"status": "cleared", "note": "附近没有敌人了"})
+        mod_post("/fight", {"active": False})
+        return json.dumps({"status": "timeout", "note": "打了一阵,可能还有敌人"})
+    if name == "loot_all":
+        return json.dumps(mod_post("/loot_all", {}))
+    if name == "craft":
+        return json.dumps(mod_post("/craft", {"item_name": args["name"], "amount": args.get("amount", 1)}))
     if name == "ask":
         say(args["question"])
         answer = next_instruction(block=True)   # BLOCK the task until the player replies with /tb
@@ -238,8 +387,13 @@ SYSTEM = """你是 TB,Terraria 世界里的 AI 二号玩家,和人类玩家搭�
 - **边干边说**:调用寻路/挖掘这类耗时工具前先说一句要干嘛,拿到关键结果再说一句。装高手一言不发是大忌。
 - **有疑问直接用 ask 问玩家,然后继续**。ask 会阻塞等玩家回答,回答回来你接着干,任务不断。
   该问就问(目标模糊、要玩家拍板),别瞎猜;但也别为了省事把简单决定丢给玩家。
+- **别原地反复 get_state 空转**。同名/看不懂的物品用 item_info 查描述,别反复问玩家"你指哪个"。
+  想清楚了就直接动手——use_item 一步就能切槽+瞄准+使用,不存在"先切槽再用"这种中间步骤。
 - get_state 位置是像素,除以16是格坐标;所有工具坐标都用格坐标。
 - 寻路失败(walled_in/loop_unresolved/timeout)要用人话告诉玩家原因并提替代方案。绝不假装成功。
+- **玩家随时能打断你**:寻路走到一半玩家发了新话,nav_to 会立刻停下并返回
+  status=interrupted + player_said(玩家的话)+ stopped_at_px(停在哪)。这时先回应玩家那句话,
+  按新意思重新决定:继续走原目标、改目标、还是干别的。别无视玩家的打断继续闷头走。
 
 找地形(比如"去丛林"):整张地图可读,别盲走探索。用 find_biome(name) 拿到丛林中心坐标,
 再 nav_to 过去。支持 jungle/snow/desert/dungeon/corruption/crimson/hallow。
@@ -247,12 +401,66 @@ SYSTEM = """你是 TB,Terraria 世界里的 AI 二号玩家,和人类玩家搭�
 找方块:先用 tile_names(关键词) 查准确的 TileID 名,再用 find_tiles(那个名) 找位置——别猜名字。
 地下的东西(生命水晶等)半径要给大(max_dist 800+),够不到就加大或先往地下走一段再找。
 
-你精通 Terraria(配方、矿物深度、进度门槛、地理)。按步骤干:查状态 → 定位目标 → 寻路 → 行动 → 验证。
+**你自己的 Terraria 记忆不可靠,别凭记忆报配方/掉落/数值/召唤条件**——这些一律用 wiki_search + wiki_page
+从官方 wiki 查准。策略性的东西(大方向怎么打)可以自己想,但具体事实必须查。
+按步骤干:查状态 → (需要知识就查 wiki) → 定位目标 → 寻路 → 行动 → 验证。
 """
 
 
+PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。玩家给一个目标,你判断它是简单的一步任务,
+还是需要拆成多个子任务的复合目标,然后只输出 JSON(不要别的话)。
+
+规则:
+- 简单直接的目标(如"去丛林""开最近的木箱""挖10个铁")→ {"multi": false}
+- 开放/复合目标(如"去丛林发育一下""准备打史莱姆王""搞一套铁装")→ 拆成有序、可执行、
+  各自有明确完成标准的子任务列表:{"multi": true, "subtasks": ["子任务1", "子任务2", ...]}
+- 子任务要具体可执行(一个子任务对应一段明确的行动),别写"发育"这种模糊的。
+- 每个子任务是给 TB 的一句中文指令。3~6 个为宜,别拆太碎。
+- 不确定的游戏知识别在这里瞎编数值,拆任务时说清目标即可(具体数值执行时 TB 会查 wiki)。
+
+只输出 JSON。"""
+
+
+def plan_goal(goal):
+    """One planning call: decide single vs multi-step. Returns (multi:bool, subtasks:list)."""
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "system", "content": PLANNER_SYSTEM},
+                      {"role": "user", "content": goal}],
+            response_format={"type": "json_object"},
+        )
+        d = json.loads(resp.choices[0].message.content)
+        if d.get("multi") and isinstance(d.get("subtasks"), list) and d["subtasks"]:
+            return True, [str(s) for s in d["subtasks"]]
+    except Exception as e:
+        print(f"[planner error] {e}")
+    return False, []
+
+
+def run_plan(goal, subtasks):
+    """Execute a multi-step plan: each subtask gets a fresh, compact context (goal + progress +
+    current subtask), so history never balloons. Player can interrupt between/within subtasks."""
+    say(f"这个目标我拆成{len(subtasks)}步:" + "、".join(subtasks) + "。开始。")
+    done = []
+    for i, sub in enumerate(subtasks):
+        progress = ";".join(f"{j+1}.{d}✓" for j, d in enumerate(done)) or "(还没开始)"
+        header = (f"【总目标】{goal}\n【已完成】{progress}\n"
+                  f"【当前子任务 {i+1}/{len(subtasks)}】{sub}\n"
+                  f"专心完成这一个子任务。做完就停(不用宣布整个计划完成)。")
+        say(f"[{i+1}/{len(subtasks)}] {sub}")
+        history = [{"role": "user", "content": header}]
+        interrupted = run_task(history)
+        if interrupted:   # player cut in mid-subtask → abort the plan, let them redirect
+            say("计划先停在这儿,你说。")
+            return
+        done.append(sub)
+    say("整个目标都办完了。")
+
+
 def run_task(history):
-    """Drive the tool loop until the model stops calling tools (task done). ask() may block inside."""
+    """Drive the tool loop until the model stops calling tools (task done). ask() may block inside.
+    Returns True if a player interruption bubbled up (caller should stop the plan)."""
     for _ in range(MAX_TURNS):
         try:
             t0 = time.monotonic()
@@ -266,7 +474,7 @@ def run_task(history):
         except Exception as e:
             print(f"[llm error] {e}")
             say("我这边出了点问题,稍后再试。")
-            return
+            return False
 
         msg = resp.choices[0].message
         entry = {"role": "assistant", "content": msg.content}
@@ -281,7 +489,7 @@ def run_task(history):
             say(msg.content.strip())
 
         if not msg.tool_calls:
-            return  # task finished
+            return False  # task finished (model stopped calling tools)
 
         for tc in msg.tool_calls:
             args = json.loads(tc.function.arguments or "{}")
@@ -290,9 +498,11 @@ def run_task(history):
                 out = run_tool(tc.function.name, args)
             except Exception as e:
                 out = json.dumps({"error": str(e)})
+            print(f"[tool<] {tc.function.name} -> {out[:300]}")
             history.append({"role": "tool", "tool_call_id": tc.id, "content": out})
 
     say("这个任务步骤太多,我先停下了。需要的话再叫我继续。")
+    return False
 
 
 def main():
@@ -316,13 +526,19 @@ def main():
             time.sleep(POLL_S)
             continue
 
-        history.append({"role": "user", "content": ins})
-        run_task(history)
-
-        if len(history) > HISTORY_MAX_MSGS:
-            del history[:len(history) - HISTORY_MAX_MSGS]
-            while history and history[0].get("role") != "user":
-                del history[0]
+        # PLAN vs ACT: an open/compound goal gets decomposed into subtasks, each run in its own
+        # compact context. A simple goal runs conversationally with rolling memory.
+        multi, subtasks = plan_goal(ins)
+        if multi:
+            print(f"[plan] {len(subtasks)} subtasks: {subtasks}")
+            run_plan(ins, subtasks)
+        else:
+            history.append({"role": "user", "content": ins})
+            run_task(history)
+            if len(history) > HISTORY_MAX_MSGS:
+                del history[:len(history) - HISTORY_MAX_MSGS]
+                while history and history[0].get("role") != "user":
+                    del history[0]
 
 
 if __name__ == "__main__":
