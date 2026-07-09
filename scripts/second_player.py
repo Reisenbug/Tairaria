@@ -280,7 +280,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "use_item",
-        "description": "对着一个格坐标使用背包里某个槽位的道具——**一步完成**:自动切到那个槽位+瞄准该格+使用。镐子挖、剑砍、放置方块、扔炸弹、用魔杖、喝药水都走这个。不需要先'切槽位'再'用',这一个调用就干完了。slot=物品的槽位号(直接抄 get_state 的 items 里那个物品的 slot 字段)。扔炸弹到脚下就是 x,y=脚下格、slot=炸弹的slot。道具有射程,先站近。",
+        "description": "对着一个格坐标使用背包里某个槽位的道具——**一步完成**:自动切槽位+瞄准+使用,并等到动作结束才返回。镐挖、斧砍树、剑砍、放方块、扔炸弹、用魔杖、喝药都走这个。slot 直接抄 get_state 里那个物品的 slot 字段。x,y 给大概位置即可:砍树/挖矿会自动吸附到最近的树干根部/可挖格,不用你算准。返回 outcome:removed=目标已消失(树倒了/矿挖掉了,成功);timeout=挥完了目标还在(没砍动,可能斧太弱或该加 duration_ticks);n/a=非采集类道具(放置/扔/喝,正常)。采集类务必先 find_tiles 拿真实坐标,别自己编。道具有射程,先 nav 到旁边。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -415,9 +415,25 @@ def run_tool(name, args):
         return json.dumps(mod_post("/mine", {
             "dir": args["dir"], "target_wx": args["target_x"], "target_wy": args["target_y"]}))
     if name == "use_item":
-        return json.dumps(mod_post("/item_use", {
+        dur = args.get("duration_ticks", 30)
+        r = mod_post("/item_use", {
             "target_wx": args["x"], "target_wy": args["y"],
-            "slot": args["slot"], "duration_ticks": args.get("duration_ticks", 30)}))
+            "slot": args["slot"], "duration_ticks": dur})
+        if not r.get("ok"):
+            return json.dumps(r)
+        # Wait for the action to finish and report the real outcome: for a chop/mine, "removed" means the target tile
+        # is gone (tree fell / ore mined), "timeout" means the swings ran out with the tile still standing. This is the
+        # completion detection — the LLM sees what actually happened instead of assuming a fixed swing count worked.
+        deadline = time.monotonic() + dur / 60.0 + 3.0   # ticks→seconds + slack for swing lag
+        st = {"active": True, "outcome": "running"}
+        while time.monotonic() < deadline:
+            time.sleep(0.2)
+            st = mod_get("/item_use_status")
+            if not st.get("active"):
+                break
+        return json.dumps({"outcome": st.get("outcome"),
+                           "snapped_to": {"x": st.get("snapped_wx"), "y": st.get("snapped_wy")}},
+                          ensure_ascii=False)
     if name == "interact":
         return json.dumps(mod_post("/interact", {"tile_x": args["x"], "tile_y": args["y"]}))
     if name == "fight":
@@ -457,7 +473,8 @@ SYSTEM = """你是 TB,Terraria 里的 AI 二号玩家,和人类搭档。接到�
 行为:
 - 说中文,简短,像队友。你的动作玩家看不见,用 say 边干边说:开始/关键进展/完成/失败各说一句。
 - 拿不准就用 ask 问玩家(目标模糊、要拍板),拿到答案继续。同名或陌生物品先 item_info 查清楚再决定。
-- 想清楚就动手,别空转。use_item 一步完成切槽+瞄准+使用。
+- 想清楚就动手,别空转。动作类工具(use_item/nav_to)已带回结果(outcome/done),别再单独 get_state 复核。
+- 砍树、挖矿这类:先 find_tiles 拿真实坐标,再 use_item;看 outcome 判断成没成,timeout 就换法(加时长/换更好的工具)。
 - 寻路或动作失败,如实告诉玩家原因,提替代方案。
 - 玩家能随时打断:工具返回 status=interrupted 时,先回应玩家的话,再按新意思决定继续/改向/干别的。
 
