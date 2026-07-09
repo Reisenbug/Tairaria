@@ -115,7 +115,7 @@ def _ws_listener():
                         txt = ev.get("data", {}).get("text")
                         if txt:
                             _instructions.put(txt)
-                    elif et in ("hurt", "threat", "hazard", "world_event"):
+                    elif et in ("hurt", "threat", "hazard", "world_event", "survival"):
                         print(f"[eye] {et} {ev.get('data', {})}")   # B-path salience events from the mod
                     _events.put(ev)
         except Exception as e:
@@ -282,7 +282,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "use_item",
-        "description": "对着一个格坐标使用背包里某个槽位的道具——**一步完成**:自动切槽位+瞄准+使用,并等到动作结束才返回。镐挖、斧砍树、剑砍、放方块、扔炸弹、用魔杖、喝药都走这个。slot 直接抄 get_state 里那个物品的 slot 字段。x,y 给大概位置即可:砍树/挖矿会自动吸附到最近的树干根部/可挖格,不用你算准。返回 outcome:removed=目标已消失(树倒了/矿挖掉了,成功);timeout=挥完了目标还在(没砍动,可能斧太弱或该加 duration_ticks);n/a=非采集类道具(放置/扔/喝,正常)。采集类务必先 find_tiles 拿真实坐标,别自己编。道具有射程,先 nav 到旁边。",
+        "description": "对着一个格坐标使用背包里某个槽位的道具——**一步完成**:自动切槽位+瞄准+使用,并等到动作结束才返回。镐挖、斧砍树、剑砍、放方块、扔炸弹、用魔杖、喝药都走这个。slot 直接抄 get_state 里那个物品的 slot 字段。x,y 给大概位置即可:砍树/挖矿会自动吸附到最近的树干根部/可挖格,不用你算准。返回 outcome:removed=目标已消失(树倒了/矿挖掉了,成功);no_progress=一下都没啃动,看 reason:reason=tool_weak 是镐/斧不够硬(换更好的);reason=blocked 是上方压着树或箱子(原版不许抽走支撑,先清掉上方那格,换镐没用);timeout=在啃但没啃完(方向对,加大 duration_ticks 再来);n/a=非采集类道具(放置/扔/喝,正常)。采集类务必先 find_tiles 拿真实坐标,别自己编。道具有射程,先 nav 到旁边。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -433,7 +433,7 @@ def run_tool(name, args):
             st = mod_get("/item_use_status")
             if not st.get("active"):
                 break
-        return json.dumps({"outcome": st.get("outcome"),
+        return json.dumps({"outcome": st.get("outcome"), "reason": st.get("reason"),
                            "snapped_to": {"x": st.get("snapped_wx"), "y": st.get("snapped_wy")}},
                           ensure_ascii=False)
     if name == "interact":
