@@ -115,6 +115,8 @@ def _ws_listener():
                         txt = ev.get("data", {}).get("text")
                         if txt:
                             _instructions.put(txt)
+                    elif et in ("hurt", "threat", "hazard", "world_event"):
+                        print(f"[eye] {et} {ev.get('data', {})}")   # B-path salience events from the mod
                     _events.put(ev)
         except Exception as e:
             print(f"[ws] disconnected ({e}), retrying...")
