@@ -34,11 +34,31 @@ NAV_REPORT_S = 12       # progress-note cadence while walking
 MAX_TURNS = 60          # tool-loop turns per task (runaway guard)
 HISTORY_MAX_MSGS = 80   # rolling conversation memory across tasks
 
+# RATE LIMIT. The endpoint allows RPM requests per minute (default 10). Bursting past it makes the server silently
+# QUEUE the extra call for ~60s — indistinguishable from a hung model unless we say so. So we self-throttle to one
+# request per MIN_CALL_GAP_S, and whenever we do have to wait, print it loudly so the user knows it's the quota, not
+# the model. Override RPM via env when the endpoint changes.
+RPM = int(os.environ.get("SECOND_PLAYER_RPM") or os.environ.get("COMMANDER_RPM", "10"))
+MIN_CALL_GAP_S = 60.0 / RPM + 0.5   # a little headroom over the exact window
+_last_llm_call = 0.0
+
 API_URL = os.environ.get("SECOND_PLAYER_API_URL") or os.environ.get("COMMANDER_API_URL", "https://api.openai.com/v1")
 API_KEY = os.environ.get("SECOND_PLAYER_API_KEY") or os.environ.get("COMMANDER_API_KEY", "")
 MODEL = os.environ.get("SECOND_PLAYER_MODEL") or os.environ.get("COMMANDER_MODEL", "")
 
 client = OpenAI(base_url=API_URL, api_key=API_KEY, timeout=120, max_retries=1)
+
+
+def throttle_llm():
+    """Enforce the endpoint's RPM so we never burst into the server's silent ~60s queue. When we must wait, SAY SO —
+    a visible '限流等待' line so the user never mistakes a quota wait for a hung model."""
+    global _last_llm_call
+    wait = MIN_CALL_GAP_S - (time.monotonic() - _last_llm_call)
+    if wait > 0:
+        print(f"⏳ 限流等待 {wait:.1f}s（RPM={RPM}，非模型卡顿）")
+        say(f"（配额限流，等 {wait:.0f} 秒再动，别急）") if wait >= 5 else None
+        time.sleep(wait)
+    _last_llm_call = time.monotonic()
 
 # bypass any http_proxy/https_proxy env vars — the mod is on localhost
 _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -355,6 +375,44 @@ TOOLS = [
 ]
 
 
+# ---- action-carries-state: every action returns the tiny slice of world needed to decide the NEXT step, so the
+# ---- model never spends a whole RPM-limited call on a bare get_state or a delta re-check. ----
+
+def _inv_map(state):
+    """name -> total stack, from a /state snapshot's items array."""
+    m = {}
+    for it in (state.get("equipment", {}).get("items", []) or []):
+        n = it.get("name")
+        if n:
+            m[n] = m.get(n, 0) + it.get("stack", 0)
+    return m
+
+def _slim(state):
+    """The minimum a decision needs after an action: where am I, am I hurt."""
+    p = state.get("player", {})
+    pos = p.get("pos", {})
+    return {"pos": {"x": round(pos.get("x", 0) / 16), "y": round(pos.get("y", 0) / 16)},
+            "hp": p.get("hp"), "on_ground": p.get("on_ground")}
+
+def _inv_snapshot():
+    return _inv_map(mod_get("/state"))
+
+def with_result(base, prev_inv):
+    """Attach post-action slim state + inventory delta (got/lost) to a tool result, so the model has what it needs
+    to decide the next step WITHOUT a separate get_state call."""
+    st = mod_get("/state")
+    now = _inv_map(st)
+    got = {n: now[n] - prev_inv.get(n, 0) for n in now if now[n] - prev_inv.get(n, 0) > 0}
+    lost = {n: prev_inv.get(n, 0) - now.get(n, 0) for n in prev_inv if prev_inv[n] - now.get(n, 0) > 0}
+    base = dict(base)
+    base["state"] = _slim(st)
+    if got:
+        base["got"] = got
+    if lost:
+        base["lost"] = lost
+    return json.dumps(base, ensure_ascii=False)
+
+
 def run_tool(name, args):
     if name == "get_state":
         return json.dumps(mod_get("/state"), ensure_ascii=False)
@@ -402,7 +460,9 @@ def run_tool(name, args):
                                    "stopped_at_px": pos})
             d = mod_get("/nav_recede_done")
             if d.get("done") or d.get("status") == "failed":
-                return json.dumps(d)
+                d = dict(d)
+                d["state"] = _slim(mod_get("/state"))   # where did we end up — no separate get_state needed
+                return json.dumps(d, ensure_ascii=False)
             # periodic progress note so the player isn't staring at a black screen
             if time.monotonic() - last_report >= NAV_REPORT_S:
                 last_report = time.monotonic()
@@ -417,6 +477,7 @@ def run_tool(name, args):
         return json.dumps(mod_post("/mine", {
             "dir": args["dir"], "target_wx": args["target_x"], "target_wy": args["target_y"]}))
     if name == "use_item":
+        prev_inv = _inv_snapshot()
         dur = args.get("duration_ticks", 30)
         r = mod_post("/item_use", {
             "target_wx": args["x"], "target_wy": args["y"],
@@ -433,11 +494,12 @@ def run_tool(name, args):
             st = mod_get("/item_use_status")
             if not st.get("active"):
                 break
-        return json.dumps({"outcome": st.get("outcome"), "reason": st.get("reason"),
-                           "snapped_to": {"x": st.get("snapped_wx"), "y": st.get("snapped_wy")}},
-                          ensure_ascii=False)
+        return with_result({"outcome": st.get("outcome"), "reason": st.get("reason"),
+                             "snapped_to": {"x": st.get("snapped_wx"), "y": st.get("snapped_wy")}}, prev_inv)
     if name == "interact":
-        return json.dumps(mod_post("/interact", {"tile_x": args["x"], "tile_y": args["y"]}))
+        prev_inv = _inv_snapshot()
+        r = mod_post("/interact", {"tile_x": args["x"], "tile_y": args["y"]})
+        return with_result(r, prev_inv)
     if name == "fight":
         max_dist = args.get("max_dist", 25)
         secs = float(args.get("seconds", 10))
@@ -454,9 +516,13 @@ def run_tool(name, args):
         mod_post("/fight", {"active": False})
         return json.dumps({"status": "timeout", "note": "打了一阵,可能还有敌人"})
     if name == "loot_all":
-        return json.dumps(mod_post("/loot_all", {}))
+        prev_inv = _inv_snapshot()
+        r = mod_post("/loot_all", {})
+        return with_result(r, prev_inv)
     if name == "craft":
-        return json.dumps(mod_post("/craft", {"item_name": args["name"], "amount": args.get("amount", 1)}))
+        prev_inv = _inv_snapshot()
+        r = mod_post("/craft", {"item_name": args["name"], "amount": args.get("amount", 1)})
+        return with_result(r, prev_inv)
     if name == "ask":
         say(args["question"])
         answer = next_instruction(block=True)   # BLOCK the task until the player replies with /tb
@@ -472,68 +538,221 @@ def run_tool(name, args):
 SYSTEM = """你是 TB,Terraria 里的 AI 二号玩家,和人类搭档。接到目标就自己分解、执行、有疑问问玩家、
 拿答案继续,直到办成。你看不到画面,感官和手都是工具。
 
+调用很贵(每分钟只能动几次),每次调用都要有用。省调用的铁律:
+- 说话写进你回复的正文里,和动作同一轮发出——正文会自动转达给玩家。别单独调 say(那白烧一次)。只有纯聊天没动作时才用 say。
+- 动作已带回结果:use_item/craft/interact/loot_all/nav_to 返回里就有 state(位置/hp)和 got/lost(物品增减)。绝不为"看一眼"或"复核"单独调 get_state。
+- 想清楚一步到位,别试探。
+
 行为:
-- 说中文,简短,像队友。你的动作玩家看不见,用 say 边干边说:开始/关键进展/完成/失败各说一句。
-- 拿不准就用 ask 问玩家(目标模糊、要拍板),拿到答案继续。同名或陌生物品先 item_info 查清楚再决定。
-- 想清楚就动手,别空转。动作类工具(use_item/nav_to)已带回结果(outcome/done),别再单独 get_state 复核。
-- 砍树、挖矿这类:先 find_tiles 拿真实坐标,再 use_item;看 outcome 判断成没成,timeout 就换法(加时长/换更好的工具)。
+- 说中文,简短,像队友。开始/完成/失败各交代一句(写正文里)。
+- 拿不准就 ask 问玩家(目标模糊、要拍板),拿到答案继续。同名或陌生物品先 item_info 查清楚。
+- 砍树、挖矿:先 find_tiles 拿真实坐标(tile 名不确定先 tile_names 查,别猜),再 use_item;看 outcome 判成败,no_progress 按 reason 换法,timeout 加时长。
 - 寻路或动作失败,如实告诉玩家原因,提替代方案。
-- 玩家能随时打断:工具返回 status=interrupted 时,先回应玩家的话,再按新意思决定继续/改向/干别的。
+- 玩家能随时打断:工具返回 status=interrupted 时,先回应,再按新意思决定继续/改向/干别的。
 
 知识:你的 Terraria 记忆不可靠。配方、掉落、数值、召唤条件一律 wiki_search + wiki_page 查官方 wiki。
 只有"大方向怎么打"这类策略可以自己想。
 """
 
 
-PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。玩家给一个目标,你判断它是简单的一步任务,
-还是需要拆成多个子任务的复合目标,然后只输出 JSON(不要别的话)。
+# ============================ 甲方案: plan-once + self-execute (LLM-Planner style) ============================
+# The brain plans a whole flat action sequence in ONE call, the executor runs it with no LLM per step, and the brain
+# is only woken again on failure/interruption. This is the RPM=10 survival strategy: brain calls track surprises,
+# not steps. Matches LLM-Planner (arXiv 2212.04088): flat plan, objects grounded at execution time via placeholders,
+# replanning on execution failure with completed-steps + current-state in the prompt.
 
-规则:
-- 简单直接的目标(如"去丛林""开最近的木箱""挖10个铁")→ {"multi": false}
-- 开放/复合目标(如"去丛林发育一下""准备打史莱姆王""搞一套铁装")→ 拆成有序、可执行、
-  各自有明确完成标准的子任务列表:{"multi": true, "subtasks": ["子任务1", "子任务2", ...]}
-- 子任务要具体可执行(一个子任务对应一段明确的行动),别写"发育"这种模糊的。
-- 每个子任务是给 TB 的一句中文指令。3~6 个为宜,别拆太碎。
-- 不确定的游戏知识别在这里瞎编数值,拆任务时说清目标即可(具体数值执行时 TB 会查 wiki)。
+PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 + 当前现状,你一次性输出一条动作序列(JSON),
+执行器会自己按序执行,不再回来问你,除非某步失败。所以要一次规划到位。
+
+只输出 JSON:{"say":"给玩家的一句话","plan":[ 动作, 动作, ... ]}
+
+每个动作是一个对象,op 是下面之一:
+- {"op":"find","id":"t","what":"<TileID英文名,如Trees/Iron/Containers>","n":1}  找最近的方块,结果存到 id
+- {"op":"nav","to":"$t.pos"}                          走到某坐标
+- {"op":"use","at":"$t.pos","tool":"axe|pick|hammer","until":"removed","dur":80}  用工具作用于某格(砍/挖)
+- {"op":"use","at":[x,y],"slot":N,"dur":30}          用背包某槽道具(放置/扔/喝);slot 抄现状 items 的 slot 字段
+- {"op":"craft","name":"<中文物品名>","amount":N}     合成
+- {"op":"interact","at":"$c.pos"}                     开箱/开门/机关
+- {"op":"loot"}                                       捡光当前箱子
+- {"op":"fight","max_dist":25,"seconds":10}           清怪
+
+占位符:find 的结果用 $id.pos 在后续步引用(规划时坐标未知,执行到那步才填)。别自己编坐标。
+前置条件自己判断:看现状背包,已有斧就别再规划找斧;缺什么就把补齐步骤也排进 plan。
+tool:"axe"/"pick"/"hammer" 让执行器自动挑背包里最好的那把,你不用管 slot。
+tile 名不确定就用常见的(树=Trees,铁矿=Iron,箱子=Containers)。plan 尽量短、直达目标。
 
 只输出 JSON。"""
 
 
-def plan_goal(goal):
-    """One planning call: decide single vs multi-step. Returns (multi:bool, subtasks:list)."""
+def plan_goal(goal, fail_ctx=None):
+    """ONE planning call → flat action sequence. fail_ctx (dict) carries replanning context after a failed step.
+    Returns (say:str, plan:list) or (None, []) on error."""
+    state = slim_world_for_planner()
+    user = f"目标:{goal}\n\n现状:\n{state}"
+    if fail_ctx:
+        user += (f"\n\n上次执行到第{fail_ctx['step']}步 {fail_ctx['op']} 失败:{fail_ctx['result']}\n"
+                 f"已完成:{fail_ctx['done']}\n给一条修复计划接着干(别从头)。")
     try:
         resp = client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "system", "content": PLANNER_SYSTEM},
-                      {"role": "user", "content": goal}],
+                      {"role": "user", "content": user}],
             response_format={"type": "json_object"},
         )
+        u = getattr(resp, "usage", None)
+        print(f"[plan] in={u.prompt_tokens} out={u.completion_tokens}" if u else "[plan]")
         d = json.loads(resp.choices[0].message.content)
-        if d.get("multi") and isinstance(d.get("subtasks"), list) and d["subtasks"]:
-            return True, [str(s) for s in d["subtasks"]]
+        plan = d.get("plan")
+        if isinstance(plan, list):
+            return d.get("say", ""), plan
     except Exception as e:
         print(f"[planner error] {e}")
-    return False, []
+    return None, []
 
 
-def run_plan(goal, subtasks):
-    """Execute a multi-step plan: each subtask gets a fresh, compact context (goal + progress +
-    current subtask), so history never balloons. Player can interrupt between/within subtasks."""
-    say(f"这个目标我拆成{len(subtasks)}步:" + "、".join(subtasks) + "。开始。")
-    done = []
-    for i, sub in enumerate(subtasks):
-        progress = ";".join(f"{j+1}.{d}✓" for j, d in enumerate(done)) or "(还没开始)"
-        header = (f"【总目标】{goal}\n【已完成】{progress}\n"
-                  f"【当前子任务 {i+1}/{len(subtasks)}】{sub}\n"
-                  f"专心完成这一个子任务。做完就停(不用宣布整个计划完成)。")
-        say(f"[{i+1}/{len(subtasks)}] {sub}")
-        history = [{"role": "user", "content": header}]
-        interrupted = run_task(history)
-        if interrupted:   # player cut in mid-subtask → abort the plan, let them redirect
-            say("计划先停在这儿,你说。")
+def slim_world_for_planner():
+    """Compact starting state for the planner: position, inventory (name/slot/stack + tool stats), biome, key world
+    flags. This IS the 'observed objects' the LLM-Planner prompt needs — so the plan is grounded from the first call
+    and the brain never spends a step just to look around."""
+    st = mod_get("/state")
+    p = st.get("player", {})
+    pos = p.get("pos", {})
+    items = []
+    for it in (st.get("equipment", {}).get("items", []) or []):
+        tag = ""
+        if it.get("axe"): tag = f" axe{it['axe']}"
+        elif it.get("pick"): tag = f" pick{it['pick']}"
+        elif it.get("hammer"): tag = f" hammer{it['hammer']}"
+        items.append(f"[{it.get('slot')}]{it.get('name')}x{it.get('stack')}{tag}")
+    w = st.get("world", {})
+    return (f"位置格({round(pos.get('x',0)/16)},{round(pos.get('y',0)/16)}) hp{p.get('hp')} biome={p.get('biome')} "
+            f"{'夜' if not w.get('day') else '昼'}{' 血月' if w.get('blood_moon') else ''}\n"
+            f"背包:{', '.join(items)}")
+
+
+def resolve_arg(v, results):
+    """Replace a '$id.field' placeholder with its actual value from a completed step's result.
+    Non-placeholder values (numbers, lists, plain strings) pass through untouched."""
+    if isinstance(v, str) and v.startswith("$"):
+        ref = v[1:]                       # e.g. "t.pos"
+        parts = ref.split(".")
+        cur = results.get(parts[0])
+        for p in parts[1:]:
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(p)
+        return cur
+    return v
+
+
+def _best_tool_slot(kind):
+    """Pick the strongest axe/pick/hammer in the inventory so the planner never has to name a slot."""
+    st = mod_get("/state")
+    best, best_slot = -1, None
+    for it in (st.get("equipment", {}).get("items", []) or []):
+        v = it.get(kind, 0)
+        if v > best:
+            best, best_slot = v, it.get("slot")
+    return best_slot
+
+
+def exec_op(op, results):
+    """Map ONE plan op to run_tool, resolving placeholders. Returns the raw json-string result. Raises on a
+    structurally bad op (missing resolved coord) so the executor can treat it as a failure to replan on."""
+    o = op.get("op")
+    if o == "find":
+        out = run_tool("find_tiles", {"name": op["what"], "n": op.get("n", 1), "max_dist": op.get("max_dist", 200)})
+        d = json.loads(out)
+        tiles = d.get("tiles") or []
+        if tiles:
+            results[op.get("id", "_")] = {"pos": {"x": tiles[0]["x"], "y": tiles[0]["y"]}, "tiles": tiles}
+        return out
+    if o == "nav":
+        pos = resolve_arg(op["to"], results)
+        if not pos:
+            return json.dumps({"error": "unresolved_coord", "to": op["to"]})
+        x, y = (pos["x"], pos["y"]) if isinstance(pos, dict) else (pos[0], pos[1])
+        return run_tool("nav_to", {"x": x, "y": y})
+    if o == "use":
+        at = resolve_arg(op["at"], results)
+        if not at:
+            return json.dumps({"error": "unresolved_coord", "at": op["at"]})
+        x, y = (at["x"], at["y"]) if isinstance(at, dict) else (at[0], at[1])
+        slot = op.get("slot")
+        if slot is None and op.get("tool"):
+            slot = _best_tool_slot(op["tool"])
+        return run_tool("use_item", {"x": x, "y": y, "slot": slot if slot is not None else -1,
+                                     "duration_ticks": op.get("dur", 60)})
+    if o == "craft":
+        return run_tool("craft", {"name": op["name"], "amount": op.get("amount", 1)})
+    if o == "interact":
+        at = resolve_arg(op["at"], results)
+        if not at:
+            return json.dumps({"error": "unresolved_coord", "at": op["at"]})
+        x, y = (at["x"], at["y"]) if isinstance(at, dict) else (at[0], at[1])
+        return run_tool("interact", {"x": x, "y": y})
+    if o == "loot":
+        return run_tool("loot_all", {})
+    if o == "fight":
+        return run_tool("fight", {"max_dist": op.get("max_dist", 25), "seconds": op.get("seconds", 10)})
+    return json.dumps({"error": f"unknown_op {o}"})
+
+
+# an op result is a FAILURE (→ wake the brain) if it carries these signals. removed/done/cleared/crafted = success.
+_FAIL_SIGNALS = ("error", "no_progress", "walled_in", "loop_unresolved", "timeout", "unresolved_coord")
+
+
+def op_failed(result_str):
+    try:
+        d = json.loads(result_str)
+    except Exception:
+        return False
+    if d.get("outcome") in ("no_progress", "timeout"):
+        return True
+    if d.get("status") in ("failed", "walled_in", "loop_unresolved", "timeout"):
+        return True
+    if "error" in d:
+        return True
+    return False
+
+
+def run_goal(goal):
+    """甲方案 top loop: plan once → execute the flat sequence → on failure, replan ONCE with context and continue.
+    Brain wakes only on failure/interruption. Player can interrupt between ops."""
+    fail_ctx = None
+    for attempt in range(3):   # initial plan + up to 2 replans, then give up (save RPM, ask player)
+        say_txt, plan = plan_goal(goal, fail_ctx)
+        if not plan:
+            say("我一时没想好怎么做,你能说得具体点吗?")
             return
-        done.append(sub)
-    say("整个目标都办完了。")
+        if say_txt:
+            say(say_txt)
+        print(f"[plan] {len(plan)} ops: {[o.get('op') for o in plan]}")
+
+        results, done = {}, []
+        for i, op in enumerate(plan):
+            # interruptible between ops
+            interrupt = next_instruction(block=False)
+            if interrupt:
+                say("好,先停,你说。")
+                _pending_instructions.append(interrupt)
+                return
+            print(f"[op {i+1}/{len(plan)}] {op}")
+            try:
+                out = exec_op(op, results)
+            except Exception as e:
+                out = json.dumps({"error": str(e)})
+            print(f"[op<] {out[:200]}")
+            if op_failed(out):
+                fail_ctx = {"step": i + 1, "op": op.get("op"), "result": out[:200], "done": done}
+                break
+            done.append(op.get("op"))
+        else:
+            return   # whole plan ran without failure — done
+    say("试了几次没成,这个我先卡住了,你看看?")
+
+
+_pending_instructions = []   # instructions caught mid-plan, re-fed to the main loop
 
 
 # tool results that are large and only matter fresh — old copies get stubbed out of the sent history
@@ -570,14 +789,19 @@ def run_task(history):
     Returns True if a player interruption bubbled up (caller should stop the plan)."""
     for _ in range(MAX_TURNS):
         try:
+            throttle_llm()
             t0 = time.monotonic()
-            print("[llm] calling...")
+            sent = [{"role": "system", "content": SYSTEM}] + compact_for_send(history)
+            approx_chars = sum(len(str(m.get("content") or "")) + len(str(m.get("tool_calls") or "")) for m in sent)
+            print(f"[llm] calling... msgs={len(sent)} ~{approx_chars}chars")
             resp = client.chat.completions.create(
                 model=MODEL,
-                messages=[{"role": "system", "content": SYSTEM}] + compact_for_send(history),
+                messages=sent,
                 tools=TOOLS,
             )
-            print(f"[llm] {time.monotonic() - t0:.1f}s")
+            u = getattr(resp, "usage", None)
+            tok = f" in={u.prompt_tokens} out={u.completion_tokens}" if u else ""
+            print(f"[llm] {time.monotonic() - t0:.1f}s{tok}")
         except Exception as e:
             print(f"[llm error] {e}")
             say("我这边出了点问题,稍后再试。")
@@ -615,12 +839,12 @@ def run_task(history):
 def main():
     print(f"second_player up — model={MODEL} api={API_URL} mod={MOD}")
     threading.Thread(target=_ws_listener, daemon=True).start()   # game↔agent event channel
-    history = []
     greeted = False
     while True:
-        # wait for the mod to be reachable, greet once per connection
+        # probe only checks reachability + greets; it must NOT consume the instruction, or the same /tb gets
+        # taken here AND left in the WS queue (double-delivery → a phantom interrupt on the first op).
         try:
-            probe = mod_get("/instruction")
+            mod_get("/state")
         except Exception:
             greeted = False
             time.sleep(3)
@@ -629,24 +853,14 @@ def main():
             greeted = True
             say("我上线了,用 /tb 指挥我。")
 
-        ins = probe.get("instruction") or next_instruction(block=False)
+        # single instruction source: next_instruction() merges the WS queue + HTTP fallback, consuming exactly once.
+        ins = _pending_instructions.pop(0) if _pending_instructions else next_instruction(block=False)
         if not ins:
             time.sleep(POLL_S)
             continue
 
-        # PLAN vs ACT: an open/compound goal gets decomposed into subtasks, each run in its own
-        # compact context. A simple goal runs conversationally with rolling memory.
-        multi, subtasks = plan_goal(ins)
-        if multi:
-            print(f"[plan] {len(subtasks)} subtasks: {subtasks}")
-            run_plan(ins, subtasks)
-        else:
-            history.append({"role": "user", "content": ins})
-            run_task(history)
-            if len(history) > HISTORY_MAX_MSGS:
-                del history[:len(history) - HISTORY_MAX_MSGS]
-                while history and history[0].get("role") != "user":
-                    del history[0]
+        # 甲方案: plan the whole goal once, self-execute, replan only on failure. Brain wakes ~1×/goal.
+        run_goal(ins)
 
 
 if __name__ == "__main__":
