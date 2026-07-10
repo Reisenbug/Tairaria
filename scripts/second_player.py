@@ -575,6 +575,8 @@ PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 +
 - {"op":"interact","at":"$c.pos"}                     开箱/开门/机关
 - {"op":"loot"}                                       捡光当前箱子
 - {"op":"fight","max_dist":25,"seconds":10}           清怪
+- {"op":"probe","id":"p","at":"$t.pos"}               查一格:有无背景墙、能否放平台/方块、是否空(結果存id)
+- {"op":"measure","id":"m","at":"$t.pos"}             量连通块尺寸:树多高/矿多大/空腔多大(結果存id)
 
 占位符:find 的结果用 $id.pos 在后续步引用(规划时坐标未知,执行到那步才填)。别自己编坐标。
 前置条件自己判断:看现状背包,已有斧就别再规划找斧;缺什么就把补齐步骤也排进 plan。
@@ -695,6 +697,24 @@ def exec_op(op, results):
         return run_tool("loot_all", {})
     if o == "fight":
         return run_tool("fight", {"max_dist": op.get("max_dist", 25), "seconds": op.get("seconds", 10)})
+    if o == "probe":
+        at = resolve_arg(op["at"], results)
+        if not at:
+            return json.dumps({"error": "unresolved_coord", "at": op["at"]})
+        x, y = (at["x"], at["y"]) if isinstance(at, dict) else (at[0], at[1])
+        out = mod_post("/probe_cell", {"x": x, "y": y})
+        if op.get("id"):
+            results[op["id"]] = out
+        return json.dumps(out, ensure_ascii=False)
+    if o == "measure":
+        at = resolve_arg(op["at"], results)
+        if not at:
+            return json.dumps({"error": "unresolved_coord", "at": op["at"]})
+        x, y = (at["x"], at["y"]) if isinstance(at, dict) else (at[0], at[1])
+        out = mod_post("/measure", {"x": x, "y": y})
+        if op.get("id"):
+            results[op["id"]] = out
+        return json.dumps(out, ensure_ascii=False)
     return json.dumps({"error": f"unknown_op {o}"})
 
 
