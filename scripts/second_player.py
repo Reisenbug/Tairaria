@@ -567,14 +567,17 @@ PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 +
 只输出 JSON:{"say":"给玩家的一句话","plan":[ 动作, 动作, ... ]}
 
 每个动作是一个对象,op 是下面之一:
-- {"op":"find","id":"t","what":"<TileID英文名,如Trees/Iron/Containers>","n":1}  找最近的方块,结果存到 id
+- {"op":"find","id":"t","what":"<TileID英文名,如Trees/Iron/Containers>","n":1}  在附近找最近的方块,结果存到 id
+- {"op":"find_biome","id":"j","what":"jungle"}        全图找生物群系中心(jungle/snow/desert/dungeon/corruption/crimson/hallow)。**去远处的丛林/雪地/地牢用这个,别用 find**
 - {"op":"nav","to":"$t.pos"}                          走到某坐标
 - {"op":"use","at":"$t.pos","tool":"axe|pick|hammer","until":"removed","dur":80}  用工具作用于某格(砍/挖)
-- {"op":"use","at":[x,y],"slot":N,"dur":30}          用背包某槽道具(放置/扔/喝);slot 抄现状 items 的 slot 字段
+- {"op":"use","at":[x,y],"slot":N,"dur":30}          用背包某槽道具作用于某格(放置/扔炸弹到某处);slot 抄现状 items 的 slot 字段
+- {"op":"use","slot":N,"dur":30}                      对自己用的道具(传送杖/喝药/召唤),不带 at
 - {"op":"craft","name":"<中文物品名>","amount":N}     合成
 - {"op":"interact","at":"$c.pos"}                     开箱/开门/机关
 - {"op":"loot"}                                       捡光当前箱子
 - {"op":"fight","max_dist":25,"seconds":10}           清怪
+- {"op":"say","content":"..."}                        中途给玩家说一句(需要边做边解释时)
 - {"op":"probe","id":"p","at":"$t.pos"}               查一格:有无背景墙、能否放平台/方块、是否空(結果存id)
 - {"op":"measure","id":"m","at":"$t.pos"}             量连通块尺寸:树多高/矿多大/空腔多大(結果存id)
 
@@ -582,6 +585,12 @@ PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 +
 前置条件自己判断:看现状背包,已有斧就别再规划找斧;缺什么就把补齐步骤也排进 plan。
 tool:"axe"/"pick"/"hammer" 让执行器自动挑背包里最好的那把,你不用管 slot。
 tile 名不确定就用常见的(树=Trees,铁矿=Iron,箱子=Containers)。plan 尽量短、直达目标。
+
+你脑内的 Terraria 知识不可靠,只用手上的真实信息:
+- 道具用途只信现状里它的 tooltip(括号那句),没写的机制就当没有。
+- op 只从上面清单选;物品只用背包里真有的。
+- 去远处生物群系用 find_biome 拿位置,别凭记忆报方位。
+- 机制/配方不确定就先做能确定的,plan 短一点没关系。
 
 只输出 JSON。"""
 
@@ -620,12 +629,24 @@ def slim_world_for_planner():
     p = st.get("player", {})
     pos = p.get("pos", {})
     items = []
+    tip_budget = 8   # cap how many tooltips we fetch, so a full backpack can't blow up tokens
     for it in (st.get("equipment", {}).get("items", []) or []):
         tag = ""
         if it.get("axe"): tag = f" axe{it['axe']}"
         elif it.get("pick"): tag = f" pick{it['pick']}"
         elif it.get("hammer"): tag = f" hammer{it['hammer']}"
-        items.append(f"[{it.get('slot')}]{it.get('name')}x{it.get('stack')}{tag}")
+        line = f"[{it.get('slot')}]{it.get('name')}x{it.get('stack')}{tag}"
+        # Attach the GAME'S OWN tooltip for functional items (wands/potions/hooks/summons land in misc/consumable) —
+        # the brain has no reliable memory of what "和谐杖" does and will invent "needs mana". The vanilla tooltip is
+        # authoritative and un-inventable. Tools/blocks are self-evident from tag, skip them.
+        cat = it.get("category", "misc")
+        if tip_budget > 0 and cat in ("misc", "consumable"):
+            info = mod_post("/item_info", {"slot": it.get("slot")})
+            tip = (info.get("tooltip") or "").strip()
+            if tip:
+                line += f"（{tip[:80]}）"
+                tip_budget -= 1
+        items.append(line)
     w = st.get("world", {})
     return (f"位置格({round(pos.get('x',0)/16)},{round(pos.get('y',0)/16)}) hp{p.get('hp')} biome={p.get('biome')} "
             f"{'夜' if not w.get('day') else '昼'}{' 血月' if w.get('blood_moon') else ''}\n"
@@ -662,12 +683,25 @@ def exec_op(op, results):
     """Map ONE plan op to run_tool, resolving placeholders. Returns the raw json-string result. Raises on a
     structurally bad op (missing resolved coord) so the executor can treat it as a failure to replan on."""
     o = op.get("op")
+    if o == "say":
+        say(op.get("content") or op.get("text") or "")
+        return json.dumps({"ok": True})
     if o == "find":
         out = run_tool("find_tiles", {"name": op["what"], "n": op.get("n", 1), "max_dist": op.get("max_dist", 200)})
         d = json.loads(out)
         tiles = d.get("tiles") or []
-        if tiles:
-            results[op.get("id", "_")] = {"pos": {"x": tiles[0]["x"], "y": tiles[0]["y"]}, "tiles": tiles}
+        if not tiles:
+            # empty find must FAIL loudly (not silently leave the placeholder unresolved) so the brain replans with
+            # a better approach — e.g. a far target like "去丛林" needs find_biome, not a local find_tiles scan.
+            return json.dumps({"error": "not_found", "what": op.get("what")}, ensure_ascii=False)
+        results[op.get("id", "_")] = {"pos": {"x": tiles[0]["x"], "y": tiles[0]["y"]}, "tiles": tiles}
+        return out
+    if o == "find_biome":
+        out = run_tool("find_biome", {"name": op["what"]})
+        d = json.loads(out)
+        if not d.get("found"):
+            return json.dumps({"error": "biome_not_found", "what": op.get("what")}, ensure_ascii=False)
+        results[op.get("id", "_")] = {"pos": {"x": d["x"], "y": d["y"]}}
         return out
     if o == "nav":
         pos = resolve_arg(op["to"], results)
@@ -676,10 +710,11 @@ def exec_op(op, results):
         x, y = (pos["x"], pos["y"]) if isinstance(pos, dict) else (pos[0], pos[1])
         return run_tool("nav_to", {"x": x, "y": y})
     if o == "use":
-        at = resolve_arg(op["at"], results)
-        if not at:
+        # self-use items (teleport wand / potion / summon) act on the player, no target coord needed → x=y=-1.
+        at = resolve_arg(op["at"], results) if op.get("at") is not None else None
+        if op.get("at") is not None and not at:
             return json.dumps({"error": "unresolved_coord", "at": op["at"]})
-        x, y = (at["x"], at["y"]) if isinstance(at, dict) else (at[0], at[1])
+        x, y = (-1, -1) if at is None else ((at["x"], at["y"]) if isinstance(at, dict) else (at[0], at[1]))
         slot = op.get("slot")
         if slot is None and op.get("tool"):
             slot = _best_tool_slot(op["tool"])
@@ -736,9 +771,25 @@ def op_failed(result_str):
     return False
 
 
+def drain_stale_instructions():
+    """A /tb is delivered on BOTH channels (WS push + HTTP queue). The main loop consumes one copy to start this
+    goal; the twin left in mod's HTTP queue would otherwise be caught as a phantom interrupt on the first op. Drain
+    it once here so only instructions that arrive AFTER planning count as real interrupts."""
+    try:
+        mod_get("/instruction")          # pop the duplicate HTTP copy of the goal we're starting
+    except Exception:
+        pass
+    while True:                          # clear any WS-queued twin too
+        try:
+            _instructions.get_nowait()
+        except queue.Empty:
+            break
+
+
 def run_goal(goal):
     """甲方案 top loop: plan once → execute the flat sequence → on failure, replan ONCE with context and continue.
     Brain wakes only on failure/interruption. Player can interrupt between ops."""
+    drain_stale_instructions()
     fail_ctx = None
     for attempt in range(3):   # initial plan + up to 2 replans, then give up (save RPM, ask player)
         say_txt, plan = plan_goal(goal, fail_ctx)
