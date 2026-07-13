@@ -484,10 +484,11 @@ def run_tool(name, args):
             "slot": args["slot"], "duration_ticks": dur})
         if not r.get("ok"):
             return json.dumps(r)
-        # Wait for the action to finish and report the real outcome: for a chop/mine, "removed" means the target tile
-        # is gone (tree fell / ore mined), "timeout" means the swings ran out with the tile still standing. This is the
-        # completion detection — the LLM sees what actually happened instead of assuming a fixed swing count worked.
-        deadline = time.monotonic() + dur / 60.0 + 3.0   # ticks→seconds + slack for swing lag
+        # Wait for the real result. A collect target (chop/mine) ends by OBSERVING the world fact — "removed" (tile
+        # gone) or "no_progress" (can't dent it) — the mod keeps swinging until then, so we poll until it's done, not
+        # to a swing budget. A non-collect use (bomb/potion) has no result tile and ends at n/a on the mod's budget.
+        # A generous safety cap only guards against a hang, it is NOT the completion condition.
+        deadline = time.monotonic() + 60.0
         st = {"active": True, "outcome": "running"}
         while time.monotonic() < deadline:
             time.sleep(0.2)
@@ -595,6 +596,123 @@ tile 名不确定就用常见的(树=Trees,铁矿=Iron,箱子=Containers)。plan
 只输出 JSON。"""
 
 
+# ============================ FIND-CLASS TEMPLATE ============================
+# Nearly every concrete Terraria task is "there's a thing in the world, go do something to it": chop tree, mine ore,
+# go to a biome, open a chest, fight a mob. They ALL share ONE skeleton — locate → nav → act → repeat-until — and
+# differ only in a handful of variables. So instead of letting the AI freely emit ops (where it hallucinates: bombs
+# to clear a path, invents '探针'), the AI only FILLS THE VARIABLES; code runs the fixed skeleton. AI can't add
+# steps, can't invent tools. One tiny AI call per goal instead of per step.
+
+FIND_CLASSIFIER_SYSTEM = """把玩家的目标填成一张变量表(JSON),别的不做。这类目标的共同形状是:
+「世界上有个东西,找到它→走过去→对它做点什么→重复到够」。只要目标是这个形状,就填表:
+
+{"find_class": true,
+ "what": "<找什么:TileID英文名如Trees/Iron/Containers,或biome名如jungle/snow/dungeon>",
+ "how": "find" 或 "find_biome",       // 近处方块用find;远处生物群系用find_biome
+ "act": "chop" | "mine" | "open" | "fight" | "none",  // 到了做什么:砍/挖/开箱/打/只是到达
+ "count": <要几个,默认1>,
+ "gather": "<可选:直到背包某物到量,如 木材>=20;不填就按count个目标算>",
+ "filter": "<可选:筛选,如 Gold Chest>",
+ "say": "给玩家的一句话"}
+
+如果目标不是这个形状(比如合成装备、造房子、复杂多步),返回 {"find_class": false}。
+
+判定:砍树=what:Trees,how:find,act:chop。挖10铁=what:Iron,act:mine,count:10。去丛林=what:jungle,how:find_biome,act:none。
+开金箱=what:Containers,act:open,filter:Gold Chest。tile名不确定就用常见的。只输出 JSON。"""
+
+
+_ACT_TOOL = {"chop": "axe", "mine": "pick"}       # act → which tool kind to auto-pick
+
+
+def classify_find(goal):
+    """One tiny AI call: fill the find-class variable table, or {find_class:false} if the goal isn't this shape."""
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "system", "content": FIND_CLASSIFIER_SYSTEM},
+                      {"role": "user", "content": f"目标:{goal}\n\n现状:\n{slim_world_for_planner()}"}],
+            response_format={"type": "json_object"},
+        )
+        u = getattr(resp, "usage", None)
+        print(f"[classify] in={u.prompt_tokens} out={u.completion_tokens}" if u else "[classify]")
+        d = json.loads(resp.choices[0].message.content)
+        return d if d.get("find_class") else None
+    except Exception as e:
+        print(f"[classify error] {e}")
+        return None
+
+
+def run_find_template(spec):
+    """Run the ONE find-class skeleton from a filled variable table — no AI, no hallucinated ops.
+    locate → nav → act → repeat until count/gather met. Returns True if it handled the goal, False to fall back."""
+    if spec.get("say"):
+        say(spec["say"])
+    what = spec.get("what")
+    how = spec.get("how", "find")
+    act = spec.get("act", "none")
+    count = int(spec.get("count", 1) or 1)
+    filt = (spec.get("filter") or "").strip().lower()
+    biome = _biome_of(what)
+    if biome:
+        how, what = "find_biome", biome
+
+    got_targets = 0
+    for _ in range(max(count, 1) + 3):     # a few extra tries for skipped/failed targets
+        # ---- LOCATE ----
+        if how == "find_biome":
+            r = mod_post("/find_biome", {"name": what})
+            if not r.get("found"):
+                say(f"没找到{what}。"); return True
+            tx, ty = r["x"], r["y"]
+        else:
+            r = mod_post("/find_tiles", {"name": what, "n": 20, "max_dist": 400})
+            tiles = r.get("tiles") or []
+            if filt:   # keep only tiles whose kind matches the requested filter
+                tiles = [t for t in tiles if filt in str(t.get("kind", "")).lower()] or tiles
+            if not tiles:
+                say(f"附近没有{what}了。"); return True
+            tx, ty = tiles[got_targets % len(tiles)]["x"], tiles[got_targets % len(tiles)]["y"]
+
+        # ---- NAV ---- (assume nav works, per current scope)
+        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))
+        if nav.get("status") in ("walled_in", "loop_unresolved", "timeout") or nav.get("status") == "failed":
+            got_targets += 1        # unreachable → try the next candidate
+            continue
+
+        # ---- ACT ----  ONE target's completion is the observed world fact: the tile is REMOVED. The mod swings until
+        # that (or no_progress = can't dent it) — no swing count. So a single use_item call resolves the whole target.
+        if act in ("chop", "mine"):
+            slot = _best_tool_slot(_ACT_TOOL[act])
+            res = json.loads(run_tool("use_item", {"x": tx, "y": ty,
+                                                   "slot": slot if slot is not None else -1, "duration_ticks": 0}))
+            if res.get("outcome") == "no_progress":
+                verb = "砍" if act == "chop" else "挖"
+                say(f"这个{verb}不动({res.get('reason')})。"); return True
+            # outcome == "removed" → this target is done
+        elif act == "open":
+            run_tool("interact", {"x": tx, "y": ty})
+            run_tool("loot_all", {})
+        elif act == "fight":
+            run_tool("fight", {"max_dist": 25, "seconds": 10})
+        # act == "none" → arriving was the goal
+
+        got_targets += 1
+        # ---- DONE? ----
+        gather = (spec.get("gather") or "").strip()
+        if gather:
+            m = re.match(r"(.+?)\s*>=\s*(\d+)", gather)
+            if m:
+                name, need = m.group(1).strip(), int(m.group(2))
+                have = _inv_snapshot().get(name, 0)
+                if have >= need:
+                    say(f"{name}够了({have})。"); return True
+                continue
+        if got_targets >= count:
+            return True
+    say("弄完了。")
+    return True
+
+
 def plan_goal(goal, fail_ctx=None):
     """ONE planning call → flat action sequence. fail_ctx (dict) carries replanning context after a failed step.
     Returns (say:str, plan:list) or (None, []) on error."""
@@ -653,6 +771,30 @@ def slim_world_for_planner():
             f"背包:{', '.join(items)}")
 
 
+_BIOME_ALIASES = {
+    "jungle": "jungle", "junglegrass": "jungle", "lihzahrdbrick": "jungle", "丛林": "jungle",
+    "snow": "snow", "ice": "snow", "雪": "snow", "雪原": "snow",
+    "desert": "desert", "沙漠": "desert",
+    "dungeon": "dungeon", "地牢": "dungeon",
+    "corruption": "corruption", "腐化": "corruption", "corrupt": "corruption",
+    "crimson": "crimson", "猩红": "crimson",
+    "hallow": "hallow", "神圣": "hallow",
+}
+
+def _biome_of(what):
+    """If a find target names a biome (however the planner spelled it), return the find_biome key; else ''."""
+    return _BIOME_ALIASES.get(str(what).strip().lower(), "")
+
+
+def _unresolved(ref):
+    """A placeholder like $jungle.pos couldn't be resolved = that find/find_biome never succeeded. Say so plainly so
+    the brain replans by FINDING it first, instead of hallucinating that it was already found."""
+    rid = str(ref)[1:].split(".")[0] if str(ref).startswith("$") else ref
+    return json.dumps({"error": "not_found_yet",
+                       "detail": f"引用 {ref} 但 '{rid}' 从没被成功找到过——先用能定位它的 find/find_biome 拿到坐标,别假设已找到"},
+                      ensure_ascii=False)
+
+
 def resolve_arg(v, results):
     """Replace a '$id.field' placeholder with its actual value from a completed step's result.
     Non-placeholder values (numbers, lists, plain strings) pass through untouched."""
@@ -686,6 +828,14 @@ def exec_op(op, results):
     if o == "say":
         say(op.get("content") or op.get("text") or "")
         return json.dumps({"ok": True})
+    # The planner keeps reaching for `find` on a biome (JungleGrass/LihzahrdBrick) even when told to use find_biome —
+    # a local tile scan can't see a far biome, so it returns empty and the plan dies. Code-level correction: if the
+    # target is a known biome, route to find_biome regardless of which op the planner picked. Don't rely on the prompt.
+    if o in ("find", "find_biome"):
+        biome = _biome_of(op.get("what", ""))
+        if biome:
+            o = "find_biome"
+            op = {**op, "what": biome}
     if o == "find":
         out = run_tool("find_tiles", {"name": op["what"], "n": op.get("n", 1), "max_dist": op.get("max_dist", 200)})
         d = json.loads(out)
@@ -706,14 +856,14 @@ def exec_op(op, results):
     if o == "nav":
         pos = resolve_arg(op["to"], results)
         if not pos:
-            return json.dumps({"error": "unresolved_coord", "to": op["to"]})
+            return _unresolved(op["to"])
         x, y = (pos["x"], pos["y"]) if isinstance(pos, dict) else (pos[0], pos[1])
         return run_tool("nav_to", {"x": x, "y": y})
     if o == "use":
         # self-use items (teleport wand / potion / summon) act on the player, no target coord needed → x=y=-1.
         at = resolve_arg(op["at"], results) if op.get("at") is not None else None
         if op.get("at") is not None and not at:
-            return json.dumps({"error": "unresolved_coord", "at": op["at"]})
+            return _unresolved(op["at"])
         x, y = (-1, -1) if at is None else ((at["x"], at["y"]) if isinstance(at, dict) else (at[0], at[1]))
         slot = op.get("slot")
         if slot is None and op.get("tool"):
@@ -725,7 +875,7 @@ def exec_op(op, results):
     if o == "interact":
         at = resolve_arg(op["at"], results)
         if not at:
-            return json.dumps({"error": "unresolved_coord", "at": op["at"]})
+            return _unresolved(op["at"])
         x, y = (at["x"], at["y"]) if isinstance(at, dict) else (at[0], at[1])
         return run_tool("interact", {"x": x, "y": y})
     if o == "loot":
@@ -787,9 +937,16 @@ def drain_stale_instructions():
 
 
 def run_goal(goal):
-    """甲方案 top loop: plan once → execute the flat sequence → on failure, replan ONCE with context and continue.
-    Brain wakes only on failure/interruption. Player can interrupt between ops."""
+    """Top loop. FAST PATH: if the goal is a find-class task (chop/mine/goto/open/fight), the AI just fills a variable
+    table and code runs the fixed skeleton — no hallucinated ops. FALLBACK: 甲方案 free planning for everything else."""
     drain_stale_instructions()
+
+    spec = classify_find(goal)
+    if spec:
+        print(f"[find-template] {spec}")
+        run_find_template(spec)
+        return
+
     fail_ctx = None
     for attempt in range(3):   # initial plan + up to 2 replans, then give up (save RPM, ask player)
         say_txt, plan = plan_goal(goal, fail_ctx)
