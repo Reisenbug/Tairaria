@@ -610,14 +610,16 @@ FIND_CLASSIFIER_SYSTEM = """把玩家的目标填成一张变量表(JSON),别的
  "what": "<找什么:TileID英文名如Trees/Iron/Containers,或biome名如jungle/snow/dungeon>",
  "how": "find" 或 "find_biome",       // 近处方块用find;远处生物群系用find_biome
  "act": "chop" | "mine" | "open" | "fight" | "none",  // 到了做什么:砍/挖/开箱/打/只是到达
- "count": <要几个,默认1>,
- "gather": "<可选:直到背包某物到量,如 木材>=20;不填就按count个目标算>",
+ "count": <砍/挖/开几个目标,默认1>,
+ "gather": "<仅当目标是'攒够某物品数量'时填,如 木材>=20;说'砍N棵/挖N个'用 count,别填 gather>",
  "filter": "<可选:筛选,如 Gold Chest>",
  "say": "给玩家的一句话"}
 
+count 和 gather 二选一:数目标个数用 count,攒物品数量用 gather。别两个都填。
 如果目标不是这个形状(比如合成装备、造房子、复杂多步),返回 {"find_class": false}。
 
-判定:砍树=what:Trees,how:find,act:chop。挖10铁=what:Iron,act:mine,count:10。去丛林=what:jungle,how:find_biome,act:none。
+判定:砍2棵树=what:Trees,act:chop,count:2(不填gather)。挖10铁=what:Iron,act:mine,count:10。
+砍树直到木材够20=act:chop,gather:木材>=20(不填count)。去丛林=what:jungle,how:find_biome,act:none。
 开金箱=what:Containers,act:open,filter:Gold Chest。tile名不确定就用常见的。只输出 JSON。"""
 
 
@@ -656,9 +658,11 @@ def run_find_template(spec):
     if biome:
         how, what = "find_biome", biome
 
-    got_targets = 0
-    for _ in range(max(count, 1) + 3):     # a few extra tries for skipped/failed targets
-        # ---- LOCATE ----
+    done_count = 0            # targets actually completed (loop-exit counter, NOT a candidate index)
+    skip = set()              # coords we couldn't reach → exclude on the next locate
+    for _ in range(max(count, 1) + 5):
+        # ---- LOCATE ---- always take the NEAREST not-yet-tried target. A completed target has vanished from the
+        # world, so the next find naturally surfaces the next one; we only need to exclude the unreachable ones.
         if how == "find_biome":
             r = mod_post("/find_biome", {"name": what})
             if not r.get("found"):
@@ -667,16 +671,19 @@ def run_find_template(spec):
         else:
             r = mod_post("/find_tiles", {"name": what, "n": 20, "max_dist": 400})
             tiles = r.get("tiles") or []
-            if filt:   # keep only tiles whose kind matches the requested filter
+            if filt:
                 tiles = [t for t in tiles if filt in str(t.get("kind", "")).lower()] or tiles
+            tiles = [t for t in tiles if (t["x"], t["y"]) not in skip]
             if not tiles:
-                say(f"附近没有{what}了。"); return True
-            tx, ty = tiles[got_targets % len(tiles)]["x"], tiles[got_targets % len(tiles)]["y"]
+                say(f"附近没有{('可到达的' if skip else '')}{what}了。"); return True
+            tx, ty = tiles[0]["x"], tiles[0]["y"]
+        print(f"[tmpl] locate → ({tx},{ty})")
 
         # ---- NAV ---- (assume nav works, per current scope)
         nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))
+        print(f"[tmpl] nav → {nav.get('status')} @ {nav.get('state',{}).get('pos')}")
         if nav.get("status") in ("walled_in", "loop_unresolved", "timeout") or nav.get("status") == "failed":
-            got_targets += 1        # unreachable → try the next candidate
+            skip.add((tx, ty))      # unreachable → exclude it and try the next-nearest
             continue
 
         # ---- ACT ----  ONE target's completion is the observed world fact: the tile is REMOVED. The mod swings until
@@ -685,10 +692,13 @@ def run_find_template(spec):
             slot = _best_tool_slot(_ACT_TOOL[act])
             res = json.loads(run_tool("use_item", {"x": tx, "y": ty,
                                                    "slot": slot if slot is not None else -1, "duration_ticks": 0}))
+            print(f"[tmpl] act {act} → outcome={res.get('outcome')} snapped={res.get('snapped_to')} got={res.get('got')}")
             if res.get("outcome") == "no_progress":
                 verb = "砍" if act == "chop" else "挖"
                 say(f"这个{verb}不动({res.get('reason')})。"); return True
-            # outcome == "removed" → this target is done
+            if res.get("outcome") != "removed":
+                # NOT removed (timeout/n/a/…) means this target did NOT actually fall — don't count it, skip & retry.
+                skip.add((tx, ty)); continue
         elif act == "open":
             run_tool("interact", {"x": tx, "y": ty})
             run_tool("loot_all", {})
@@ -696,10 +706,12 @@ def run_find_template(spec):
             run_tool("fight", {"max_dist": 25, "seconds": 10})
         # act == "none" → arriving was the goal
 
-        got_targets += 1
-        # ---- DONE? ----
+        done_count += 1
+        # ---- DONE? ----  count vs gather are mutually exclusive. If the user gave an explicit count (>1), that wins
+        # even if the AI also (wrongly) filled gather — "砍2棵" must not stop because inventory already had wood.
+        # gather only applies when no explicit count was given (count defaulted to 1).
         gather = (spec.get("gather") or "").strip()
-        if gather:
+        if gather and count <= 1:
             m = re.match(r"(.+?)\s*>=\s*(\d+)", gather)
             if m:
                 name, need = m.group(1).strip(), int(m.group(2))
@@ -707,9 +719,9 @@ def run_find_template(spec):
                 if have >= need:
                     say(f"{name}够了({have})。"); return True
                 continue
-        if got_targets >= count:
-            return True
-    say("弄完了。")
+        if done_count >= count:
+            say(f"搞定,{done_count}个。"); return True
+    say(f"弄完了({done_count}个)。")
     return True
 
 
