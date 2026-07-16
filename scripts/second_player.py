@@ -441,7 +441,10 @@ def run_tool(name, args):
         return json.dumps(mod_post("/find_tiles", {
             "name": args["name"], "n": args.get("n", 5), "max_dist": args.get("max_dist", 300)}))
     if name == "nav_to":
-        r = mod_post("/nav_recede", {"gx": args["x"], "gy": args["y"]})
+        req = {"gx": args["x"], "gy": args["y"]}
+        if args.get("exact"):   # mining: goal is a solid ore the body can't stand on — dig a shaft down to it
+            req["exact"] = True
+        r = mod_post("/nav_recede", req)
         if not r.get("ok"):
             return json.dumps(r)
         deadline = time.monotonic() + NAV_TIMEOUT_S
@@ -679,23 +682,49 @@ def run_find_template(spec):
             tx, ty = tiles[0]["x"], tiles[0]["y"]
         print(f"[tmpl] locate → ({tx},{ty})")
 
-        # ---- NAV ---- (assume nav works, per current scope)
-        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))
+        # ---- NAV ---- (assume nav works, per current scope). MINING navigates EXACT: the ore sits inside solid rock
+        # the body can't stand on, so nav digs a shaft straight down to that tile — arrival IS the ore mined out, no
+        # separate swing needed. Everything else navigates to a standable cell beside the target, then acts.
+        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty, "exact": act == "mine"}))
         print(f"[tmpl] nav → {nav.get('status')} @ {nav.get('state',{}).get('pos')}")
         if nav.get("status") in ("walled_in", "loop_unresolved", "timeout") or nav.get("status") == "failed":
             skip.add((tx, ty))      # unreachable → exclude it and try the next-nearest
             continue
 
-        # ---- ACT ----  ONE target's completion is the observed world fact: the tile is REMOVED. The mod swings until
-        # that (or no_progress = can't dent it) — no swing count. So a single use_item call resolves the whole target.
-        if act in ("chop", "mine"):
+        # ---- ACT ----  ONE target's completion is the observed world fact: the tile is REMOVED.
+        if act == "mine":
+            # exact-nav dug a shaft to the nearest ore (it's gone now). The body now stands INSIDE the vein, so a
+            # whole cluster of the same ore sits within reach. Batch-mine every reachable one from this stance —
+            # like a human clearing a pocket before moving on — instead of navigating to each ore separately.
+            done_count += 1                       # the shaft-target ore itself
+            reach = mod_get("/mine_reach")
+            if not reach.get("error"):
+                mslot = _best_tool_slot("pick")
+                mined_here = 0
+                # re-find same-type ores, keep only those inside the reach rectangle, mine each until removed
+                rr = mod_post("/find_tiles", {"name": what, "n": 40, "max_dist": 60})
+                for t in (rr.get("tiles") or []):
+                    ox, oy = t["x"], t["y"]
+                    if not (reach["lx"] <= ox <= reach["hx"] and reach["ly"] <= oy <= reach["hy"]):
+                        continue
+                    res = json.loads(run_tool("use_item", {"x": ox, "y": oy,
+                                                           "slot": mslot if mslot is not None else -1, "duration_ticks": 0}))
+                    if res.get("outcome") == "removed":
+                        done_count += 1; mined_here += 1
+                    if done_count >= count:
+                        break
+                print(f"[tmpl] mine batch → +{mined_here} in reach [{reach['lx']},{reach['ly']}..{reach['hx']},{reach['hy']}]")
+            if done_count >= count:
+                say(f"搞定,{done_count}个。"); return True
+            continue                              # cluster cleared → locate the next vein
+        elif act == "chop":
+            # tree: stand beside it, swing the axe until the trunk is REMOVED (or no_progress = can't dent it).
             slot = _best_tool_slot(_ACT_TOOL[act])
             res = json.loads(run_tool("use_item", {"x": tx, "y": ty,
                                                    "slot": slot if slot is not None else -1, "duration_ticks": 0}))
             print(f"[tmpl] act {act} → outcome={res.get('outcome')} snapped={res.get('snapped_to')} got={res.get('got')}")
             if res.get("outcome") == "no_progress":
-                verb = "砍" if act == "chop" else "挖"
-                say(f"这个{verb}不动({res.get('reason')})。"); return True
+                say(f"这个砍不动({res.get('reason')})。"); return True
             if res.get("outcome") != "removed":
                 # NOT removed (timeout/n/a/…) means this target did NOT actually fall — don't count it, skip & retry.
                 skip.add((tx, ty)); continue
