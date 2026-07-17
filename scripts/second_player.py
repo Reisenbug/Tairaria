@@ -259,6 +259,15 @@ TOOLS = [
         },
     }},
     {"type": "function", "function": {
+        "name": "find_descent",
+        "description": "找某 biome '下地狱代价最低'的地表主入口(main entrance)。不是逐列扫——用多源 Dijkstra 从地狱层整体向上流,顺着真实洞穴形状算代价,S形洞口从顶部进也算得出来。返回 {found,x,y,cost}。要速降地狱时先用它拿入口,再 nav_to 过去。biome 名同 find_biome。",
+        "parameters": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "biome 名,如 'jungle'"}},
+            "required": ["name"],
+        },
+    }},
+    {"type": "function", "function": {
         "name": "tile_names",
         "description": "查 find_tiles 能用的方块名。给一个关键词(英文,如 'heart'/'chest'/'altar'),返回所有含该词的原版 TileID 名。找方块前先用它确认准确名字,别猜。",
         "parameters": {
@@ -435,6 +444,8 @@ def run_tool(name, args):
         return json.dumps(mod_post("/item_info", payload))
     if name == "find_biome":
         return json.dumps(mod_post("/find_biome", {"name": args["name"]}))
+    if name == "find_descent":
+        return json.dumps(mod_post("/find_descent", {"name": args["name"]}))
     if name == "tile_names":
         return json.dumps(mod_post("/tile_names", {"q": args.get("q", "")}))
     if name == "find_tiles":
