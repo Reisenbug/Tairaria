@@ -484,7 +484,8 @@ def run_tool(name, args):
         dur = args.get("duration_ticks", 30)
         r = mod_post("/item_use", {
             "target_wx": args["x"], "target_wy": args["y"],
-            "slot": args["slot"], "duration_ticks": dur})
+            "slot": args["slot"], "duration_ticks": dur,
+            "strict": bool(args.get("strict"))})
         if not r.get("ok"):
             return json.dumps(r)
         # Wait for the real result. A collect target (chop/mine) ends by OBSERVING the world fact — "removed" (tile
@@ -499,7 +500,8 @@ def run_tool(name, args):
             if not st.get("active"):
                 break
         return with_result({"outcome": st.get("outcome"), "reason": st.get("reason"),
-                             "snapped_to": {"x": st.get("snapped_wx"), "y": st.get("snapped_wy")}}, prev_inv)
+                             "snapped_to": {"x": st.get("snapped_wx"), "y": st.get("snapped_wy")},
+                             "target": st.get("target")}, prev_inv)
     if name == "interact":
         prev_inv = _inv_snapshot()
         r = mod_post("/interact", {"tile_x": args["x"], "tile_y": args["y"]})
@@ -707,12 +709,20 @@ def run_find_template(spec):
                     ox, oy = t["x"], t["y"]
                     if not (reach["lx"] <= ox <= reach["hx"] and reach["ly"] <= oy <= reach["hy"]):
                         continue
-                    res = json.loads(run_tool("use_item", {"x": ox, "y": oy,
+                    # strict: never let snap re-aim to some random rock when this exact ore is gone
+                    res = json.loads(run_tool("use_item", {"x": ox, "y": oy, "strict": True,
                                                            "slot": mslot if mslot is not None else -1, "duration_ticks": 0}))
-                    if res.get("outcome") == "removed":
+                    out, why = res.get("outcome"), res.get("reason") or ""
+                    print(f"[tmpl] mine ({ox},{oy}) → {out}{('/' + why) if why else ''} got={res.get('got')}")
+                    if out == "removed":
                         done_count += 1; mined_here += 1
-                    if done_count >= count:
+                        if done_count >= count:
+                            break
+                    elif why == "out_of_reach":
+                        # mining below moved the body (fell into own hole) → the whole batch's stance is stale.
+                        # Stop swinging at ghosts; the outer loop re-locates from where we actually stand now.
                         break
+                    # target_gone → already vanished, try the next candidate
                 print(f"[tmpl] mine batch → +{mined_here} in reach [{reach['lx']},{reach['ly']}..{reach['hx']},{reach['hy']}]")
             if done_count >= count:
                 say(f"搞定,{done_count}个。"); return True
