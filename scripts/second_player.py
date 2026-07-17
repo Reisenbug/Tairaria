@@ -290,10 +290,12 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "nav_to",
-        "description": "用 Bellman 寻路走/跳/挖/搭桥到目标格坐标。阻塞直到到达、失败或超时,返回结果。失败带原因码(walled_in/loop_unresolved/timeout等)——如实告诉玩家并考虑替代方案。",
+        "description": "用 Bellman 寻路走/跳/挖/搭桥到目标格坐标。阻塞直到到达、失败或超时,返回结果。失败带原因码(walled_in/loop_unresolved/timeout等)——如实告诉玩家并考虑替代方案。可选 greed:沿途收集白名单(TileID 名数组,如 [\"Containers\",\"Heart\"])——赶路时每隔几秒扫附近,发现白名单目标就顺路捡了(开箱/挖掉)再继续赶路;够不着的自动放弃不纠缠。长途赶路+要沿途搜刮时用它。",
         "parameters": {
             "type": "object",
-            "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
+            "properties": {"x": {"type": "integer"}, "y": {"type": "integer"},
+                           "greed": {"type": "array", "items": {"type": "string"},
+                                     "description": "沿途收集的 TileID 名,如 Containers/Heart"}},
             "required": ["x", "y"],
         },
     }},
@@ -422,6 +424,27 @@ def with_result(base, prev_inv):
     return json.dumps(base, ensure_ascii=False)
 
 
+def _greed_collect(cat, t):
+    """One side-trip for whitelisted loot while traveling: chest → open+loot, anything else → pick it out.
+    Fails FAST — can't reach or can't dent means give up and move on; the journey matters more than any
+    single trinket. Returns an interrupted-result dict if the player spoke mid-trip (caller hands it up)."""
+    tx, ty = t["x"], t["y"]
+    say(f"顺路捡:{t.get('kind') or cat}({tx},{ty})")
+    nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))   # no greed here — side-trips don't nest
+    if nav.get("status") == "interrupted":
+        return nav
+    if not nav.get("done") and nav.get("status") != "done":
+        return None
+    if cat == "Containers":
+        run_tool("interact", {"x": tx, "y": ty})
+        run_tool("loot_all", {})
+    else:
+        slot = _best_tool_slot("pick")
+        run_tool("use_item", {"x": tx, "y": ty, "strict": True,
+                              "slot": slot if slot is not None else -1, "duration_ticks": 0})
+    return None
+
+
 def run_tool(name, args):
     if name == "get_state":
         return json.dumps(mod_get("/state"), ensure_ascii=False)
@@ -455,38 +478,66 @@ def run_tool(name, args):
         req = {"gx": args["x"], "gy": args["y"]}
         if args.get("exact"):   # mining: goal is a solid ore the body can't stand on — dig a shaft down to it
             req["exact"] = True
-        r = mod_post("/nav_recede", req)
-        if not r.get("ok"):
-            return json.dumps(r)
-        deadline = time.monotonic() + NAV_TIMEOUT_S
-        last_report = time.monotonic()
-        while time.monotonic() < deadline:
-            time.sleep(0.5)
-            # INTERRUPTIBLE: a new /tb while walking means the player wants to intervene.
-            # Stop nav, hand the interruption + where-we-stopped back to the LLM to re-decide.
-            interrupt = next_instruction(block=False)
-            if interrupt:
-                mod_post("/nav_recede_stop", {})
-                st = mod_get("/state")
-                pos = st.get("player", {}).get("pos", {})
-                return json.dumps({"done": False, "status": "interrupted",
-                                   "player_said": interrupt,
-                                   "stopped_at_px": pos})
-            d = mod_get("/nav_recede_done")
-            if d.get("done") or d.get("status") == "failed":
-                d = dict(d)
-                d["state"] = _slim(mod_get("/state"))   # where did we end up — no separate get_state needed
-                return json.dumps(d, ensure_ascii=False)
-            # periodic progress note so the player isn't staring at a black screen
-            if time.monotonic() - last_report >= NAV_REPORT_S:
-                last_report = time.monotonic()
-                st = mod_get("/state")
-                pos = st.get("player", {}).get("pos", {})
-                px, py = pos.get("x", 0) / 16, pos.get("y", 0) / 16
-                dist = abs(px - args["x"]) + abs(py - args["y"])
-                say(f"还在走,离目标还有约{int(dist)}格。")
-        mod_post("/nav_recede_stop", {})
-        return json.dumps({"done": False, "status": "timeout"})
+        greed = [g for g in (args.get("greed") or []) if isinstance(g, str)]
+        visited = set()          # loot we already grabbed or gave up on — never circle back
+        while True:
+            r = mod_post("/nav_recede", req)
+            if not r.get("ok"):
+                return json.dumps(r)
+            deadline = time.monotonic() + NAV_TIMEOUT_S
+            last_report = time.monotonic()
+            last_greed = time.monotonic()
+            resume = False
+            while time.monotonic() < deadline:
+                time.sleep(0.5)
+                # INTERRUPTIBLE: a new /tb while walking means the player wants to intervene.
+                # Stop nav, hand the interruption + where-we-stopped back to the LLM to re-decide.
+                interrupt = next_instruction(block=False)
+                if interrupt:
+                    mod_post("/nav_recede_stop", {})
+                    st = mod_get("/state")
+                    pos = st.get("player", {}).get("pos", {})
+                    return json.dumps({"done": False, "status": "interrupted",
+                                       "player_said": interrupt,
+                                       "stopped_at_px": pos})
+                d = mod_get("/nav_recede_done")
+                if d.get("done") or d.get("status") == "failed":
+                    d = dict(d)
+                    d["state"] = _slim(mod_get("/state"))   # where did we end up — no separate get_state needed
+                    return json.dumps(d, ensure_ascii=False)
+                # GREED: while traveling, scan for whitelisted loot nearby; grab it, then resume the journey
+                # (receding nav restarts from wherever we stand — the goal field is cached, resume is free).
+                if greed and time.monotonic() - last_greed >= 3.0:
+                    last_greed = time.monotonic()
+                    hit = None
+                    for cat in greed:
+                        rr = mod_post("/find_tiles", {"name": cat, "n": 5, "max_dist": 25})
+                        for t in (rr.get("tiles") or []):
+                            if (t["x"], t["y"]) not in visited:
+                                hit = (cat, t); break
+                        if hit:
+                            break
+                    if hit:
+                        cat, t = hit
+                        visited.add((t["x"], t["y"]))
+                        mod_post("/nav_recede_stop", {})
+                        intr = _greed_collect(cat, t)
+                        if intr:
+                            return json.dumps(intr)   # player spoke during the side-trip — hand it up
+                        resume = True
+                        break
+                # periodic progress note so the player isn't staring at a black screen
+                if time.monotonic() - last_report >= NAV_REPORT_S:
+                    last_report = time.monotonic()
+                    st = mod_get("/state")
+                    pos = st.get("player", {}).get("pos", {})
+                    px, py = pos.get("x", 0) / 16, pos.get("y", 0) / 16
+                    dist = abs(px - args["x"]) + abs(py - args["y"])
+                    say(f"还在走,离目标还有约{int(dist)}格。")
+            if resume:
+                continue
+            mod_post("/nav_recede_stop", {})
+            return json.dumps({"done": False, "status": "timeout"})
     if name == "mine":
         return json.dumps(mod_post("/mine", {
             "dir": args["dir"], "target_wx": args["target_x"], "target_wy": args["target_y"]}))
