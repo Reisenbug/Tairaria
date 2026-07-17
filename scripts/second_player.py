@@ -694,7 +694,7 @@ FIND_CLASSIFIER_SYSTEM = """把玩家的目标填成一张变量表(JSON),别的
 
 {"find_class": true,
  "what": "<找什么:TileID英文名如Trees/Iron/Containers,或biome名如jungle/snow/dungeon>",
- "how": "find" 或 "find_biome",       // 近处方块用find;远处生物群系用find_biome
+ "how": "find" 或 "find_biome" 或 "find_descent",  // 近处方块find;远处生物群系find_biome;'主道/主入口/下地狱'用find_descent
  "act": "chop" | "mine" | "open" | "fight" | "none",  // 到了做什么:砍/挖/开箱/打/只是到达
  "count": <砍/挖/开几个目标,默认1>,
  "gather": "<仅当目标是'攒够某物品数量'时填,如 木材>=20;说'砍N棵/挖N个'用 count,别填 gather>",
@@ -742,14 +742,21 @@ def run_find_template(spec):
     filt = (spec.get("filter") or "").strip().lower()
     biome = _biome_of(what)
     if biome:
-        how, what = "find_biome", biome
+        what = biome
+        if how != "find_descent":     # descent routing must survive the biome auto-route
+            how = "find_biome"
 
     done_count = 0            # targets actually completed (loop-exit counter, NOT a candidate index)
     skip = set()              # coords we couldn't reach → exclude on the next locate
     for _ in range(max(count, 1) + 5):
         # ---- LOCATE ---- always take the NEAREST not-yet-tried target. A completed target has vanished from the
         # world, so the next find naturally surfaces the next one; we only need to exclude the unreachable ones.
-        if how == "find_biome":
+        if how == "find_descent":
+            r = mod_post("/find_descent", {"name": what})
+            if not r.get("found"):
+                say(f"没找到{what}的主入口。"); return True
+            tx, ty = r["x"], r["y"]
+        elif how == "find_biome":
             r = mod_post("/find_biome", {"name": what})
             if not r.get("found"):
                 say(f"没找到{what}。"); return True
@@ -1075,6 +1082,10 @@ def run_goal(goal):
 
     spec = classify_find(goal)
     if spec:
+        # keyword routing in CODE, not prompt-trust: 主道/主入口/下地狱 means the descent-cost main entrance
+        # (find_descent), never the nearest-edge surface tile find_biome would return.
+        if re.search(r"主道|主入口|下地狱|速降|main", goal, re.I):
+            spec["how"] = "find_descent"
         print(f"[find-template] {spec}")
         run_find_template(spec)
         return
