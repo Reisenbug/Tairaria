@@ -268,6 +268,19 @@ TOOLS = [
         },
     }},
     {"type": "function", "function": {
+        "name": "descent_route",
+        "description": "在 find_descent 基础上,把'主入口→地狱'整条路线画进游戏画面(青色主线,持续2分钟),并列出绕路可及的箱子(金)和生命水晶(粉),真实支线路径相连。两档范围:挖<=dig_max且走<=walk_max → tier=main(顺手必捡);挖<=dig_max2且走<=walk_max2 → tier=optional(值不值你判断);再远不列。返回 {found,entrance,cost,line_len,treasures:[{x,y,kind,tier,line_x,line_y,dig,walk}]},dig/walk 是实际要挖/走的格数,line_x/line_y 是接驳点。规划'下地狱顺路搜刮'先调它。",
+        "parameters": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "biome 名,如 'jungle'"},
+                           "dig_max": {"type": "integer", "description": "main档挖掘格数上限,默认20"},
+                           "walk_max": {"type": "integer", "description": "main档移动格数上限,默认60"},
+                           "dig_max2": {"type": "integer", "description": "optional档挖掘上限,默认50"},
+                           "walk_max2": {"type": "integer", "description": "optional档移动上限,默认120"}},
+            "required": ["name"],
+        },
+    }},
+    {"type": "function", "function": {
         "name": "tile_names",
         "description": "查 find_tiles 能用的方块名。给一个关键词(英文,如 'heart'/'chest'/'altar'),返回所有含该词的原版 TileID 名。找方块前先用它确认准确名字,别猜。",
         "parameters": {
@@ -469,6 +482,12 @@ def run_tool(name, args):
         return json.dumps(mod_post("/find_biome", {"name": args["name"]}))
     if name == "find_descent":
         return json.dumps(mod_post("/find_descent", {"name": args["name"]}))
+    if name == "descent_route":
+        req = {"name": args["name"]}
+        for k in ("dig_max", "walk_max", "dig_max2", "walk_max2"):
+            if args.get(k):
+                req[k] = int(args[k])
+        return json.dumps(mod_post("/descent_route", req))
     if name == "tile_names":
         return json.dumps(mod_post("/tile_names", {"q": args.get("q", "")}))
     if name == "find_tiles":
