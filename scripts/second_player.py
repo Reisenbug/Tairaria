@@ -1289,5 +1289,24 @@ def main():
         run_goal(ins)
 
 
+def release_game():
+    """Ctrl+C must NOT leave the character possessed: stop every coordinator that could still be driving
+    controls (nav walking, pick swinging, mining, placing, fighting). Best-effort — the mod may be gone."""
+    for path in ("/nav_recede_stop", "/item_use_stop", "/mine_stop", "/place_stop",
+                 "/walk_to_edge_stop", "/jump_stop"):
+        try:
+            mod_post(path, {})
+        except Exception:
+            pass
+    try:
+        say("我下线了。")
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[exit] releasing game controls...")
+        release_game()
