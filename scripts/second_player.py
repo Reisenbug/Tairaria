@@ -743,7 +743,7 @@ def run_find_template(spec):
     biome = _biome_of(what)
     if biome:
         what = biome
-        if how != "find_descent":     # descent routing must survive the biome auto-route
+        if how not in ("find_descent", "descend"):   # descent routing must survive the biome auto-route
             how = "find_biome"
 
     done_count = 0            # targets actually completed (loop-exit counter, NOT a candidate index)
@@ -751,7 +751,14 @@ def run_find_template(spec):
     for _ in range(max(count, 1) + 5):
         # ---- LOCATE ---- always take the NEAREST not-yet-tried target. A completed target has vanished from the
         # world, so the next find naturally surfaces the next one; we only need to exclude the unreachable ones.
-        if how == "find_descent":
+        if how == "descend":
+            # full descent: target is the LINE'S HELL ENDPOINT, loot grabbed along the way. Biome defaults to
+            # jungle (the milestone's descent shaft) when the goal named none.
+            r = mod_post("/descent_route", {"name": biome or "jungle"})
+            if not r.get("found"):
+                say("没找到下地狱的路线。"); return True
+            tx, ty = r["hell_x"], r["hell_y"]
+        elif how == "find_descent":
             r = mod_post("/find_descent", {"name": what})
             if not r.get("found"):
                 say(f"没找到{what}的主入口。"); return True
@@ -775,7 +782,10 @@ def run_find_template(spec):
         # ---- NAV ---- (assume nav works, per current scope). MINING navigates EXACT: the ore sits inside solid rock
         # the body can't stand on, so nav digs a shaft straight down to that tile — arrival IS the ore mined out, no
         # separate swing needed. Everything else navigates to a standable cell beside the target, then acts.
-        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty, "exact": act == "mine"}))
+        nav_args = {"x": tx, "y": ty, "exact": act == "mine"}
+        if how == "descend":
+            nav_args["greed"] = ["Containers", "Heart"]   # loot the corridor on the way down
+        nav = json.loads(run_tool("nav_to", nav_args))
         print(f"[tmpl] nav → {nav.get('status')} @ {nav.get('state',{}).get('pos')}")
         if nav.get("status") in ("walled_in", "loop_unresolved", "timeout") or nav.get("status") == "failed":
             skip.add((tx, ty))      # unreachable → exclude it and try the next-nearest
@@ -1082,9 +1092,11 @@ def run_goal(goal):
 
     spec = classify_find(goal)
     if spec:
-        # keyword routing in CODE, not prompt-trust: 主道/主入口/下地狱 means the descent-cost main entrance
-        # (find_descent), never the nearest-edge surface tile find_biome would return.
-        if re.search(r"主道|主入口|下地狱|速降|main", goal, re.I):
+        # keyword routing in CODE, not prompt-trust. 下地狱/速降 = travel the whole descent line to its hell
+        # endpoint (greedy loot on the way); 主道/主入口 = just go stand at the descent-cost main entrance.
+        if re.search(r"下地狱|去地狱|速降", goal):
+            spec["how"] = "descend"
+        elif re.search(r"主道|主入口|main", goal, re.I):
             spec["how"] = "find_descent"
         print(f"[find-template] {spec}")
         run_find_template(spec)
