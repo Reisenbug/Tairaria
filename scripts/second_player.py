@@ -506,9 +506,23 @@ def run_tool(name, args):
             deadline = time.monotonic() + NAV_TIMEOUT_S
             last_report = time.monotonic()
             last_greed = time.monotonic()
+            hurt_times = []
             resume = False
             while time.monotonic() < deadline:
                 time.sleep(0.5)
+                # HARASSED: the reflex layer swings at whatever is in arm's reach, but a foe that lands 3 hits
+                # inside 10s is blocking real progress — stop, clear it properly, then resume the journey.
+                for ev in drain_events():
+                    if ev.get("type") == "hurt":
+                        hurt_times.append(time.monotonic())
+                hurt_times = [h for h in hurt_times if time.monotonic() - h < 10]
+                if len(hurt_times) >= 3:
+                    mod_post("/nav_recede_stop", {})
+                    say("被缠上了,清一下怪再走。")
+                    run_tool("fight", {"max_dist": 25, "seconds": 8})
+                    hurt_times = []
+                    resume = True
+                    break
                 # INTERRUPTIBLE: a new /tb while walking means the player wants to intervene.
                 # Stop nav, hand the interruption + where-we-stopped back to the LLM to re-decide.
                 interrupt = next_instruction(block=False)
@@ -730,6 +744,44 @@ def classify_find(goal):
         return None
 
 
+def _run_descend(bname):
+    """ITINERARY descent: consume /descent_route's plan instead of blind-radius greed. Walk the line junction
+    by junction (line order), branch off to each main-tier treasure, collect, return, and finish at the hell
+    endpoint. The final stretch keeps radius-greed as a fallback net for anything the plan didn't list."""
+    r = mod_post("/descent_route", {"name": bname})
+    if not r.get("found"):
+        say("没找到下地狱的路线。")
+        return True
+    plan = [t for t in (r.get("treasures") or []) if t.get("tier") == "main"]
+    plan.sort(key=lambda t: t.get("line_i", 0))
+    chests = sum(1 for t in plan if t["kind"] == "chest")
+    say(f"沿主道下地狱,计划途中拿{len(plan)}个宝({chests}箱/{len(plan) - chests}水晶)。")
+    grabbed = 0
+    for t in plan:
+        nav = json.loads(run_tool("nav_to", {"x": t["line_x"], "y": t["line_y"]}))
+        st = nav.get("status")
+        if st == "interrupted":
+            say("(被打断,停下待命)"); return True
+        if not nav.get("done") and st != "done":
+            print(f"[descend] junction ({t['line_x']},{t['line_y']}) unreachable ({st}) — skip treasure")
+            continue
+        cat = "Containers" if t["kind"] == "chest" else "Heart"
+        intr = _greed_collect(cat, t)
+        if intr:
+            say("(被打断,停下待命)"); return True
+        grabbed += 1
+    nav = json.loads(run_tool("nav_to", {"x": r["hell_x"], "y": r["hell_y"],
+                                         "greed": ["Containers", "Heart"]}))
+    st = nav.get("status")
+    if st == "interrupted":
+        say("(被打断,停下待命)"); return True
+    if nav.get("done") or st == "done":
+        say(f"到地狱了,途中收了{grabbed}个宝。")
+    else:
+        say(f"下降中断({st}),已收{grabbed}个宝。")
+    return True
+
+
 def run_find_template(spec):
     """Run the ONE find-class skeleton from a filled variable table — no AI, no hallucinated ops.
     locate → nav → act → repeat until count/gather met. Returns True if it handled the goal, False to fall back."""
@@ -745,20 +797,15 @@ def run_find_template(spec):
         what = biome
         if how not in ("find_descent", "descend"):   # descent routing must survive the biome auto-route
             how = "find_biome"
+    if how == "descend":
+        return _run_descend(biome or "jungle")
 
     done_count = 0            # targets actually completed (loop-exit counter, NOT a candidate index)
     skip = set()              # coords we couldn't reach → exclude on the next locate
     for _ in range(max(count, 1) + 5):
         # ---- LOCATE ---- always take the NEAREST not-yet-tried target. A completed target has vanished from the
         # world, so the next find naturally surfaces the next one; we only need to exclude the unreachable ones.
-        if how == "descend":
-            # full descent: target is the LINE'S HELL ENDPOINT, loot grabbed along the way. Biome defaults to
-            # jungle (the milestone's descent shaft) when the goal named none.
-            r = mod_post("/descent_route", {"name": biome or "jungle"})
-            if not r.get("found"):
-                say("没找到下地狱的路线。"); return True
-            tx, ty = r["hell_x"], r["hell_y"]
-        elif how == "find_descent":
+        if how == "find_descent":
             r = mod_post("/find_descent", {"name": what})
             if not r.get("found"):
                 say(f"没找到{what}的主入口。"); return True
@@ -782,10 +829,7 @@ def run_find_template(spec):
         # ---- NAV ---- (assume nav works, per current scope). MINING navigates EXACT: the ore sits inside solid rock
         # the body can't stand on, so nav digs a shaft straight down to that tile — arrival IS the ore mined out, no
         # separate swing needed. Everything else navigates to a standable cell beside the target, then acts.
-        nav_args = {"x": tx, "y": ty, "exact": act == "mine"}
-        if how == "descend":
-            nav_args["greed"] = ["Containers", "Heart"]   # loot the corridor on the way down
-        nav = json.loads(run_tool("nav_to", nav_args))
+        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty, "exact": act == "mine"}))
         print(f"[tmpl] nav → {nav.get('status')} @ {nav.get('state',{}).get('pos')}")
         if nav.get("status") in ("walled_in", "loop_unresolved", "timeout") or nav.get("status") == "failed":
             skip.add((tx, ty))      # unreachable → exclude it and try the next-nearest
