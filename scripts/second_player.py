@@ -708,7 +708,10 @@ FIND_CLASSIFIER_SYSTEM = """把玩家的目标填成一张变量表(JSON),别的
 
 {"find_class": true,
  "what": "<找什么:TileID英文名如Trees/Iron/Containers,或biome名如jungle/snow/dungeon>",
- "how": "find" 或 "find_biome" 或 "find_descent",  // 近处方块find;远处生物群系find_biome;'主道/主入口/下地狱'用find_descent
+ "how": "find" | "find_biome" | "find_descent" | "descend",
+ // find=近处方块; find_biome=去某生物群系(最近边缘);
+ // find_descent=去某群系通往地狱的主入口站定(玩家提到主道/主入口/大洞口这类意思);
+ // descend=沿主道一路下到地狱,途中按计划捡宝(玩家想去地狱/底层/下矿速降这类意思);biome不明时填jungle
  "act": "chop" | "mine" | "open" | "fight" | "none",  // 到了做什么:砍/挖/开箱/打/只是到达
  "count": <砍/挖/开几个目标,默认1>,
  "gather": "<仅当目标是'攒够某物品数量'时填,如 木材>=20;说'砍N棵/挖N个'用 count,别填 gather>",
@@ -720,6 +723,7 @@ count 和 gather 二选一:数目标个数用 count,攒物品数量用 gather。
 
 判定:砍2棵树=what:Trees,act:chop,count:2(不填gather)。挖10铁=what:Iron,act:mine,count:10。
 砍树直到木材够20=act:chop,gather:木材>=20(不填count)。去丛林=what:jungle,how:find_biome,act:none。
+下地狱/去底层=what:jungle,how:descend,act:none。去丛林主道口=what:jungle,how:find_descent,act:none。
 开金箱=what:Containers,act:open,filter:Gold Chest。tile名不确定就用常见的。只输出 JSON。"""
 
 
@@ -1129,35 +1133,11 @@ def drain_stale_instructions():
             break
 
 
-def _biome_in_text(goal):
-    """First biome alias mentioned anywhere in the goal text, or ''."""
-    g = str(goal).lower()
-    for k, v in _BIOME_ALIASES.items():
-        if k in g:
-            return v
-    return ""
-
-
 def run_goal(goal):
-    """Top loop. HARD ROUTING first: deterministic goals (descend / main entrance) run pure code — no LLM gets a
-    chance to invent a different plan or narrate tools it won't use. Then FAST PATH: find-class goals fill a
-    variable table and code runs the skeleton. FALLBACK: 甲方案 free planning for everything else."""
+    """Top loop. FAST PATH: if the goal is a find-class task (chop/mine/goto/open/fight/descend), the AI fills a
+    variable table and code runs the fixed skeleton — no hallucinated ops. FALLBACK: 甲方案 free planning for
+    everything else. Understanding intent is the BRAIN's job; code only guarantees execution after routing."""
     drain_stale_instructions()
-
-    # HARD ROUTING — before any LLM call. classify once returned find_class:false for 下地狱 and the free
-    # planner took over, navigated to the jungle EDGE and narrated a magic wand it never used. Code decides.
-    if re.search(r"下地狱|去地狱|速降", goal):
-        _run_descend(_biome_in_text(goal) or "jungle")
-        return
-    if re.search(r"主道|主入口|main", goal, re.I):
-        bn = _biome_in_text(goal) or "jungle"
-        r = mod_post("/find_descent", {"name": bn})
-        if not r.get("found"):
-            say(f"没找到{bn}的主入口。"); return
-        say(f"去{bn}主入口。")
-        nav = json.loads(run_tool("nav_to", {"x": r["x"], "y": r["y"]}))
-        say("到主入口了。" if nav.get("done") or nav.get("status") == "done" else f"没走到({nav.get('status')})。")
-        return
 
     spec = classify_find(goal)
     if spec:
