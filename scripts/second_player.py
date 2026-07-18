@@ -1129,19 +1129,38 @@ def drain_stale_instructions():
             break
 
 
+def _biome_in_text(goal):
+    """First biome alias mentioned anywhere in the goal text, or ''."""
+    g = str(goal).lower()
+    for k, v in _BIOME_ALIASES.items():
+        if k in g:
+            return v
+    return ""
+
+
 def run_goal(goal):
-    """Top loop. FAST PATH: if the goal is a find-class task (chop/mine/goto/open/fight), the AI just fills a variable
-    table and code runs the fixed skeleton — no hallucinated ops. FALLBACK: 甲方案 free planning for everything else."""
+    """Top loop. HARD ROUTING first: deterministic goals (descend / main entrance) run pure code — no LLM gets a
+    chance to invent a different plan or narrate tools it won't use. Then FAST PATH: find-class goals fill a
+    variable table and code runs the skeleton. FALLBACK: 甲方案 free planning for everything else."""
     drain_stale_instructions()
+
+    # HARD ROUTING — before any LLM call. classify once returned find_class:false for 下地狱 and the free
+    # planner took over, navigated to the jungle EDGE and narrated a magic wand it never used. Code decides.
+    if re.search(r"下地狱|去地狱|速降", goal):
+        _run_descend(_biome_in_text(goal) or "jungle")
+        return
+    if re.search(r"主道|主入口|main", goal, re.I):
+        bn = _biome_in_text(goal) or "jungle"
+        r = mod_post("/find_descent", {"name": bn})
+        if not r.get("found"):
+            say(f"没找到{bn}的主入口。"); return
+        say(f"去{bn}主入口。")
+        nav = json.loads(run_tool("nav_to", {"x": r["x"], "y": r["y"]}))
+        say("到主入口了。" if nav.get("done") or nav.get("status") == "done" else f"没走到({nav.get('status')})。")
+        return
 
     spec = classify_find(goal)
     if spec:
-        # keyword routing in CODE, not prompt-trust. 下地狱/速降 = travel the whole descent line to its hell
-        # endpoint (greedy loot on the way); 主道/主入口 = just go stand at the descent-cost main entrance.
-        if re.search(r"下地狱|去地狱|速降", goal):
-            spec["how"] = "descend"
-        elif re.search(r"主道|主入口|main", goal, re.I):
-            spec["how"] = "find_descent"
         print(f"[find-template] {spec}")
         run_find_template(spec)
         return
