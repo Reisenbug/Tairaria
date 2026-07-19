@@ -748,10 +748,21 @@ def classify_find(goal):
         return None
 
 
+def _descent_h(x, y):
+    """Cost-to-hell at a cell per the last /descent_route field; -1 = unknown (off-field / no route yet)."""
+    try:
+        return mod_post("/descent_h", {"x": x, "y": y}).get("h", -1)
+    except Exception:
+        return -1
+
+
 def _run_descend(bname):
     """ITINERARY descent: consume /descent_route's plan instead of blind-radius greed. Walk the line junction
     by junction (line order), branch off to each main-tier treasure, collect, return, and finish at the hell
-    endpoint. The final stretch keeps radius-greed as a fallback net for anything the plan didn't list."""
+    endpoint. Progress along the route is judged by the REAL descent field (cost-to-hell H), not by script
+    position: any junction with higher H than the player is already behind us — fell past it, got knocked
+    ahead, whatever — and is skipped instead of walked back to. The final stretch keeps radius-greed as a
+    fallback net for anything the plan didn't list."""
     r = mod_post("/descent_route", {"name": bname})
     if not r.get("found"):
         say("没找到下地狱的路线。")
@@ -762,6 +773,12 @@ def _run_descend(bname):
     say(f"沿主道下地狱,计划途中拿{len(plan)}个宝({chests}箱/{len(plan) - chests}水晶)。")
     grabbed = 0
     for t in plan:
+        pos = _slim(mod_get("/state"))["pos"]
+        ph = _descent_h(pos["x"], pos["y"])
+        jh = _descent_h(t["line_x"], t["line_y"])
+        if ph >= 0 and jh >= 0 and jh > ph + 30:
+            print(f"[descend] junction ({t['line_x']},{t['line_y']}) H{jh} > player H{ph} — already behind, skip")
+            continue
         nav = json.loads(run_tool("nav_to", {"x": t["line_x"], "y": t["line_y"]}))
         st = nav.get("status")
         if st == "interrupted":
