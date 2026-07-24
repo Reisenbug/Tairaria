@@ -326,14 +326,14 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "use_item",
-        "description": "对着一个格坐标使用背包里某个槽位的道具——**一步完成**:自动切槽位+瞄准+使用,并等到动作结束才返回。镐挖、斧砍树、剑砍、放方块、扔炸弹、用魔杖、喝药都走这个。slot 直接抄 get_state 里那个物品的 slot 字段。x,y 给大概位置即可:砍树/挖矿会自动吸附到最近的树干根部/可挖格,不用你算准。返回 outcome:removed=目标已消失(树倒了/矿挖掉了,成功);no_progress=一下都没啃动,看 reason:reason=tool_weak 是镐/斧不够硬(换更好的);reason=blocked 是上方压着树或箱子(原版不许抽走支撑,先清掉上方那格,换镐没用);timeout=在啃但没啃完(方向对,加大 duration_ticks 再来);n/a=非采集类道具(放置/扔/喝,正常)。采集类务必先 find_tiles 拿真实坐标,别自己编。道具有射程,先 nav 到旁边。",
+        "description": "对着一个格坐标使用背包里某个槽位的道具——**一步完成**:自动切槽位+瞄准+使用,并等到动作结束才返回。镐挖、斧砍树、剑砍、放方块、扔炸弹、用魔杖、喝药都走这个。slot 直接抄 get_state 里那个物品的 slot 字段。x,y 给大概位置即可:砍树/挖矿会自动吸附到最近的树干根部/可挖格,不用你算准。返回 outcome:removed=目标已消失(树倒了/矿挖掉了,成功);no_progress=一下都没啃动,看 reason:reason=tool_weak 是镐/斧不够硬(换更好的);reason=blocked 是上方压着树或箱子(原版不许抽走支撑,先清掉上方那格,换镐没用)。挖和放都【挖到/放到为止】,不用你估时间。放方块:placed=方块已出现(成功);not_placed=挥了但没放上,看 reason:occupied=那格已被占/out_of_reach=够不到/wrong_item=手上不是那个/out_of_stock=没货了/rejected=游戏拒绝了这次放置(那格空的、够得到、东西也对,但没放上——多半是这个放置本身没意义,比如对着半空放绳子)/rejected_no_anchor_hint=同上,且四周没有可附着的方块(仅供参考,不是硬规则)/no_swing=一次都没挥出去(通常够不到)。n/a=只有喝药/扔炸弹/召唤这种既不采集也不放置的才是 n/a。采集类务必先 find_tiles 拿真实坐标,别自己编。道具有射程,先 nav 到旁边。",
         "parameters": {
             "type": "object",
             "properties": {
                 "x": {"type": "integer", "description": "目标格x"},
                 "y": {"type": "integer", "description": "目标格y"},
                 "slot": {"type": "integer", "description": "物品栏槽位号(0-based)"},
-                "duration_ticks": {"type": "integer", "description": "持续使用的帧数,默认30(约0.5秒);连续挖/放要大一些"},
+                "duration_ticks": {"type": "integer", "description": "【挖和放都不用填】它们挖到/放到为止。只有喝药/扔炸弹/召唤这种没有可观测结果的才需要,默认30"},
             },
             "required": ["x", "y", "slot"],
         },
@@ -376,6 +376,51 @@ TOOLS = [
                 "amount": {"type": "integer", "description": "数量,默认1"},
             },
             "required": ["name"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "act",
+        "description": (
+            "最底层的动作原语——按键+光标+使用,你自己编排。上面那些工具做不到的事(搭绳梯、边爬边放、"
+            "钩爪、骑坐骑、精确连放)就用这个。\n"
+            "steps 数组【串行】执行,一个 step 内的所有字段【同时】生效。\n"
+            "坐标一律相对【脚下那一格】(origin):dx>0 向右, dy>0 向下。[0,0]=人所在的格,[0,1]=踩着的地板。"
+            "origin 每帧跟着人走,所以 rel 适合边走边做;要钉死在一个世界格上用 at。\n"
+            "字段:keys 数组(left/right/up/down/jump/use_tile/throw/hook/mount)、rel或at [dx,dy]=光标位置、"
+            "slot=用哪个槽的东西(0-57,抄 get_state)、use=true 持续使用手上的东西、"
+            "until=这步什么时候算完(【必填】)、invariant=这步成立的前提,一旦破了立刻停下报告。\n"
+            "until 五选一:{\"frames\":N} 按住N帧 / {\"times\":N} 用N次 / "
+            "{\"consumed\":{\"item\":物品ID,\"n\":N}} 消耗掉N个 / {\"moved\":{\"dx\":0,\"dy\":-5}} 移动了几格 / "
+            "{\"tile\":{\"rel\":[0,-1],\"has\":true}} 某格出现/消失了方块。\n"
+            "invariant 三选一:{\"on_rope\":true} 必须挂在绳上 / {\"cursor_in_reach\":true} 光标必须够得到 / "
+            "{\"on_ground\":true} 必须站地上。\n"
+            "返回 outcome:done=完成;no_progress=进度卡住不动了;invariant_broken=前提破了;timeout=超时。"
+            "失败时【会把现场原样给你】——光标在哪一格、够不够得到、那格有没有方块、有没有可附着的邻居、"
+            "人在哪/在不在绳上/站没站地、手上拿的什么还剩几个。why 数组列出可疑项。"
+            "【看现场自己想明白哪一步错了再改】,别原样重发。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "steps": {"type": "array", "description": "串行执行的步骤", "items": {
+                    "type": "object",
+                    "properties": {
+                        "keys": {"type": "array", "items": {"type": "string"},
+                                 "description": "同时按住的键:left/right/up/down/jump/use_tile/throw/hook/mount"},
+                        "rel": {"type": "array", "items": {"type": "integer"},
+                                "description": "光标格[dx,dy],相对脚下格,每帧跟着人走"},
+                        "at": {"type": "array", "items": {"type": "integer"},
+                               "description": "光标格[dx,dy],开始时算一次就钉死不动"},
+                        "slot": {"type": "integer", "description": "用哪个槽位的物品(0-57)"},
+                        "use": {"type": "boolean", "description": "true=持续使用手上的物品"},
+                        "until": {"type": "object", "description": "结束条件,必填"},
+                        "invariant": {"type": "object", "description": "前提,破了立刻停"},
+                    },
+                    "required": ["until"],
+                }},
+                "timeout_frames": {"type": "integer", "description": "总超时帧数,默认1800(30秒)"},
+            },
+            "required": ["steps"],
         },
     }},
     {"type": "function", "function": {
@@ -490,6 +535,12 @@ def run_tool(name, args):
         return json.dumps(mod_post("/descent_route", req))
     if name == "tile_names":
         return json.dumps(mod_post("/tile_names", {"q": args.get("q", "")}))
+    if name == "build_replay":
+        anchor = None
+        if args.get("ax") is not None and args.get("ay") is not None:
+            anchor = (int(args["ax"]), int(args["ay"]))
+        out = _run_build_replay(anchor)
+        return out if isinstance(out, str) else "ok"
     if name == "find_tiles":
         return json.dumps(mod_post("/find_tiles", {
             "name": args["name"], "n": args.get("n", 5), "max_dist": args.get("max_dist", 300)}))
@@ -616,6 +667,26 @@ def run_tool(name, args):
                 return json.dumps({"status": "cleared", "note": "附近没有敌人了"})
         mod_post("/fight", {"active": False})
         return json.dumps({"status": "timeout", "note": "打了一阵,可能还有敌人"})
+    # act: raw action primitive. The mod runs the step machine frame by frame; we just block until it settles and
+    # hand back WHATEVER it saw. On failure the scene (cursor/target/player/held + why) goes to the LLM verbatim —
+    # it is supposed to diagnose from the numbers, so summarising or trimming here would defeat the point.
+    if name == "act":
+        r = mod_post("/act", {"steps": args["steps"],
+                              "timeout_frames": args.get("timeout_frames", 1800)})
+        if not r.get("ok"):
+            return json.dumps({"outcome": "bad_request", "reason": r.get("reason"),
+                               "note": "每个 step 都必须有 until"}, ensure_ascii=False)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            time.sleep(0.2)
+            st = mod_get("/act_status")
+            if not st.get("active"):
+                return json.dumps(st, ensure_ascii=False)
+            if next_instruction(block=False):
+                mod_post("/act_stop", {})
+                return json.dumps({"outcome": "interrupted"}, ensure_ascii=False)
+        mod_post("/act_stop", {})
+        return json.dumps(mod_get("/act_status"), ensure_ascii=False)
     if name == "loot_all":
         prev_inv = _inv_snapshot()
         r = mod_post("/loot_all", {})
@@ -671,14 +742,22 @@ PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 +
 - {"op":"find","id":"t","what":"<TileID英文名,如Trees/Iron/Containers>","n":1}  在附近找最近的方块,结果存到 id
 - {"op":"find_biome","id":"j","what":"jungle"}        全图找生物群系中心(jungle/snow/desert/dungeon/corruption/crimson/hallow)。**去远处的丛林/雪地/地牢用这个,别用 find**
 - {"op":"nav","to":"$t.pos"}                          走到某坐标
-- {"op":"use","at":"$t.pos","tool":"axe|pick|hammer","until":"removed","dur":80}  用工具作用于某格(砍/挖)
-- {"op":"use","at":[x,y],"slot":N,"dur":30}          用背包某槽道具作用于某格(放置/扔炸弹到某处);slot 抄现状 items 的 slot 字段
-- {"op":"use","slot":N,"dur":30}                      对自己用的道具(传送杖/喝药/召唤),不带 at
+- {"op":"use","at":"$t.pos","tool":"axe|pick|hammer"}  用工具作用于某格(砍/挖);挖到为止,不用给时间
+- {"op":"use","at":[x,y],"slot":N}                  放方块到某格;放到为止,不用给时间。slot 抄现状 items 的 slot 字段,别猜
+- {"op":"use","slot":N,"dur":30}                      对自己用的道具(传送杖/喝药/召唤),不带 at;这类才需要 dur
 - {"op":"craft","name":"<中文物品名>","amount":N}     合成
 - {"op":"interact","at":"$c.pos"}                     开箱/开门/机关
 - {"op":"loot"}                                       捡光当前箱子
 - {"op":"fight","max_dist":25,"seconds":10}           清怪
 - {"op":"say","content":"..."}                        中途给玩家说一句(需要边做边解释时)
+- {"op":"act","steps":[...],"timeout_frames":1800}    底层动作原语:按键+光标+使用,自己编排。
+  【要边做边看的连续动作用它】——搭绳梯、边走边铺平台、钩爪、连放。steps 串行,一个 step 内字段同时生效。
+  坐标相对【脚下那一格】:dx>0右, dy>0下, [0,0]=人所在格, [0,1]=踩的地板。rel=每帧跟着人走, at=开始时钉死。
+  step 字段:keys(left/right/up/down/jump/use_tile/throw/hook/mount)、rel或at [dx,dy]、slot、use:true、
+  until(必填)、invariant(可选,破了立刻停)。
+  until 五选一:{"frames":N}/{"times":N}/{"consumed":{"item":物品ID,"n":N}}/{"moved":{"dx":0,"dy":-5}}/
+  {"tile":{"rel":[0,-1],"has":true}}。invariant:{"on_rope":true}/{"cursor_in_reach":true}/{"on_ground":true}。
+  失败会把现场原样给你(光标在哪/够不够得到/那格有什么/人在不在绳上/手里剩几个),看现场再改,别原样重发。
 - {"op":"probe","id":"p","at":"$t.pos"}               查一格:有无背景墙、能否放平台/方块、是否空(結果存id)
 - {"op":"measure","id":"m","at":"$t.pos"}             量连通块尺寸:树多高/矿多大/空腔多大(結果存id)
 
@@ -708,10 +787,11 @@ FIND_CLASSIFIER_SYSTEM = """把玩家的目标填成一张变量表(JSON),别的
 
 {"find_class": true,
  "what": "<找什么:TileID英文名如Trees/Iron/Containers,或biome名如jungle/snow/dungeon>",
- "how": "find" | "find_biome" | "find_descent" | "descend",
+ "how": "find" | "find_biome" | "find_descent" | "descend" | "build_replay",
  // find=近处方块; find_biome=去某生物群系(最近边缘);
  // find_descent=去某群系通往地狱的主入口站定(玩家提到主道/主入口/大洞口这类意思);
  // descend=沿主道一路下到地狱,途中按计划捡宝(玩家想去地狱/底层/下矿速降这类意思);biome不明时填jungle
+ // build_replay=回放录制好的建造(玩家想照录像盖房子/重现录制的结构这类意思);what/act 留空
  "act": "chop" | "mine" | "open" | "fight" | "none",  // 到了做什么:砍/挖/开箱/打/只是到达
  "count": <砍/挖/开几个目标,默认1>,
  "gather": "<仅当目标是'攒够某物品数量'时填,如 木材>=20;说'砍N棵/挖N个'用 count,别填 gather>",
@@ -721,9 +801,16 @@ FIND_CLASSIFIER_SYSTEM = """把玩家的目标填成一张变量表(JSON),别的
 count 和 gather 二选一:数目标个数用 count,攒物品数量用 gather。别两个都填。
 如果目标不是这个形状(比如合成装备、造房子、复杂多步),返回 {"find_class": false}。
 
+【关键区分】这张表只管「世界上已经存在、要去找的东西」。
+玩家要【用背包里的材料去放置/建造】的,不属于这个形状,一律 {"find_class": false}:
+放绳子/搭绳梯/铺平台/垒方块/搭桥/盖墙/放火把/摆家具——这些的材料在背包里,没什么可找的。
+反例对照:「挖20个铁」=去世界上找铁矿(填表);「放20个绳子」=用背包的绳子往外放(find_class:false)。
+what 只填要去世界上找的目标,永远别把背包里的材料名(Rope/Wood/Platform这类)填进 what。
+
 判定:砍2棵树=what:Trees,act:chop,count:2(不填gather)。挖10铁=what:Iron,act:mine,count:10。
 砍树直到木材够20=act:chop,gather:木材>=20(不填count)。去丛林=what:jungle,how:find_biome,act:none。
 下地狱/去底层=what:jungle,how:descend,act:none。去丛林主道口=what:jungle,how:find_descent,act:none。
+照录像盖房子/回放建造/重现录的结构=how:build_replay(what/act 留空)。
 开金箱=what:Containers,act:open,filter:Gold Chest。tile名不确定就用常见的。只输出 JSON。"""
 
 
@@ -803,6 +890,33 @@ def _run_descend(bname):
     return True
 
 
+def _run_build_replay(anchor=None):
+    """TRIGGER ONLY. All record/replay logic lives in the mod (BuildReplayer is a frame-driven state machine:
+    nav→place/mine→next, conflict cells skipped, self-contained). Python just kicks it off and relays progress.
+    Poll /build_replay_status for a live note; a /tb mid-flight stops the replay and hands control back."""
+    req = {"ax": anchor[0], "ay": anchor[1]} if anchor else {}
+    r = mod_post("/build_replay_start", req)
+    if not r.get("ok"):
+        say(f"没法开始回放建造：{r.get('reason', '未知')}")
+        return True
+    say(f"开始回放建造（{r.get('events', '?')} 个事件，冲突 {r.get('conflicts', 0)} 格，淡色已画在屏幕上）。")
+    last_note = time.monotonic()
+    while True:
+        time.sleep(0.5)
+        interrupt = next_instruction(block=False)
+        if interrupt:
+            mod_post("/build_replay_stop", {})
+            return json.dumps({"done": False, "status": "interrupted", "player_said": interrupt})
+        st = mod_get("/build_replay_status")
+        if not st.get("running"):
+            say(f"建造回放结束：放置{st.get('placed', 0)}，挖掘{st.get('mined', 0)}，"
+                f"跳过{st.get('skipped', 0)}{('，' + st['fail_reason']) if st.get('fail_reason') else ''}。")
+            return True
+        if time.monotonic() - last_note >= NAV_REPORT_S:
+            last_note = time.monotonic()
+            say(f"还在盖：第{st.get('i', 0)}/{st.get('total', 0)}件。")
+
+
 def run_find_template(spec):
     """Run the ONE find-class skeleton from a filled variable table — no AI, no hallucinated ops.
     locate → nav → act → repeat until count/gather met. Returns True if it handled the goal, False to fall back."""
@@ -813,6 +927,8 @@ def run_find_template(spec):
     act = spec.get("act", "none")
     count = int(spec.get("count", 1) or 1)
     filt = (spec.get("filter") or "").strip().lower()
+    if how == "build_replay":                        # before biome auto-route: build has no `what`
+        return _run_build_replay()
     biome = _biome_of(what)
     if biome:
         what = biome
@@ -1084,6 +1200,9 @@ def exec_op(op, results):
             slot = _best_tool_slot(op["tool"])
         return run_tool("use_item", {"x": x, "y": y, "slot": slot if slot is not None else -1,
                                      "duration_ticks": op.get("dur", 60)})
+    if o == "act":
+        return run_tool("act", {"steps": op["steps"],
+                                "timeout_frames": op.get("timeout_frames", 1800)})
     if o == "craft":
         return run_tool("craft", {"name": op["name"], "amount": op.get("amount", 1)})
     if o == "interact":
@@ -1117,8 +1236,8 @@ def exec_op(op, results):
     return json.dumps({"error": f"unknown_op {o}"})
 
 
-# an op result is a FAILURE (→ wake the brain) if it carries these signals. removed/done/cleared/crafted = success.
-_FAIL_SIGNALS = ("error", "no_progress", "walled_in", "loop_unresolved", "timeout", "unresolved_coord")
+# an op result is a FAILURE (→ wake the brain) if it carries these signals. removed/placed/done/cleared/crafted = success.
+_FAIL_SIGNALS = ("error", "no_progress", "not_placed", "no_swing", "walled_in", "loop_unresolved", "timeout", "unresolved_coord")
 
 
 def op_failed(result_str):
@@ -1126,7 +1245,10 @@ def op_failed(result_str):
         d = json.loads(result_str)
     except Exception:
         return False
-    if d.get("outcome") in ("no_progress", "timeout"):
+    # not_placed/no_swing = placement produced no tile (the eye that used to be blind); reason says why.
+    # invariant_broken/bad_request come from /act — a step's premise snapped, or the chain was malformed.
+    if d.get("outcome") in ("no_progress", "timeout", "not_placed", "no_swing",
+                            "invariant_broken", "bad_request"):
         return True
     if d.get("status") in ("failed", "walled_in", "loop_unresolved", "timeout"):
         return True
