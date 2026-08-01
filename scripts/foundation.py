@@ -11,12 +11,22 @@ MOD = "http://127.0.0.1:17878"
 _op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+def _wire(o):
+    """Item ids are ints here (the honest type) but the mod parses "item" out of the raw body with a regex that
+    expects a quoted string. Stringify every "item" value on the way out, once, so no call site has to remember."""
+    if isinstance(o, dict):
+        return {k: (str(v) if k == "item" and isinstance(v, int) else _wire(v)) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_wire(v) for v in o]
+    return o
+
+
 def post(path, payload=None):
     # ensure_ascii=False: the mod matches item names by their raw UTF-8 characters ("绳"), so the body must carry
     # them literally. json.dumps escapes non-ASCII to \uXXXX by default, which turned "绳" into the literal seven
     # characters 绳 and matched no item — the "no_item" that curl (raw bytes) never reproduced.
     req = urllib.request.Request(
-        f"{MOD}{path}", data=json.dumps(payload or {}, ensure_ascii=False).encode("utf-8"),
+        f"{MOD}{path}", data=json.dumps(_wire(payload or {}), ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json"}, method="POST")
     try:
         with _op.open(req, timeout=10) as r:
@@ -53,9 +63,12 @@ def die(msg, extra=None):
     sys.exit(1)
 
 
-ROPE = "绳"
-FLOOR = "木平台"      # the single platform landed on at the top of the rope, to hop onto
-BRIDGE = "木材"       # the 20-cell foundation run — SOLID BLOCKS, not a platform
+# Items are given to the mod as ITEM IDs (item.type) — stable under localization and item aliases, unlike the
+# display name that a language change silently breaks. The mod's ResolveSlot takes either: an all-digits string is
+# an id, anything else is a name. post() stringifies ids on the way out.
+ROPE = 965
+FLOOR = 94            # 木平台 — the single platform landed on at the top of the rope, to hop onto
+BRIDGE = 9            # 木材 — the 20-cell foundation run: SOLID BLOCKS, not a platform
 LENGTH = 20
 DIRECTION = "right"
 
@@ -253,26 +266,28 @@ o = post("/origin")
 floor_row = o["cy"]                          # the row the player's own cell occupies on the base
 print(f"    on foundation at {o['cx']},{o['cy']}, floor_row={floor_row}")
 
-WORKBENCH, TABLE, CHAIR, WALL, TORCH = "工作台", "木桌", "木椅", "木墙", "火把"
+WORKBENCH, TABLE, CHAIR, WALL, TORCH = 36, 32, 34, 93, 8   # 工作台 木桌 木椅 木墙 火把
+# (火把 item id 8 places tile id 4 — the tile id is NOT an item id and must never be sent as one.)
 NEED = {TABLE: 3, CHAIR: 4, WALL: 96}
 
-state = get("/state")
-have = {}
-for it in state.get("equipment", {}).get("items", []):
-    n = it.get("name")
-    if n:
-        have[n] = have.get(n, 0) + it.get("stack", 0)
+def counts():
+    """id -> total stack held, read from /state (which reports each item's numeric id)."""
+    out = {}
+    for it in get("/state").get("equipment", {}).get("items", []):
+        i = it.get("id")
+        if i:
+            out[i] = out.get(i, 0) + it.get("stack", 0)
+    return out
+
+have = counts()
 
 print("\n[10] furnish")
 
 # workbench: make one if none in inventory, then place it at local x=19
 if have.get(WORKBENCH, 0) < 1:
     print("    crafting workbench")
-    post("/craft", {"item_name": WORKBENCH, "amount": 1})
-    state = get("/state"); have = {}
-    for it in state.get("equipment", {}).get("items", []):
-        n = it.get("name")
-        if n: have[n] = have.get(n, 0) + it.get("stack", 0)
+    post("/craft", {"item_id": WORKBENCH, "amount": 1})
+    have = counts()
 
 print(f"    settle to local x=19 (col {wx(19)}) and place workbench")
 post("/settle", {"col": wx(19)})
@@ -283,9 +298,9 @@ wait("/place_at_status", 20)
 # The recipe list is proximity-driven: 木桌/木椅/木墙 only appear once the workbench is placed AND
 # registered near the player. Placement is frame-driven, so the recipe may lag a few frames — wait for
 # a furniture recipe to show up before crafting, instead of firing a craft that finds no recipe.
-def recipe_available(name):
+def recipe_available(item_id):
     for r in get("/state").get("available_recipes", []):
-        if r.get("item_name") == name:
+        if r.get("item_id") == item_id:
             return True
     return False
 
@@ -300,7 +315,7 @@ for item, need in NEED.items():
     short = need - have.get(item, 0)
     if short > 0:
         print(f"    craft {item} x{short} (have {have.get(item,0)}/{need})")
-        r = post("/craft", {"item_name": item, "amount": short})
+        r = post("/craft", {"item_id": item, "amount": short})
         print("      ", json.dumps(r, ensure_ascii=False))
     else:
         print(f"    {item}: have {have.get(item,0)} ≥ {need}, skip")
