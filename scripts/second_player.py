@@ -844,35 +844,30 @@ def _descent_h(x, y):
 
 
 def _run_descend(bname):
-    """ITINERARY descent: consume /descent_route's plan instead of blind-radius greed. Walk the line junction
-    by junction (line order), branch off to each main-tier treasure, collect, return, and finish at the hell
-    endpoint. Progress along the route is judged by the REAL descent field (cost-to-hell H), not by script
-    position: any junction with higher H than the player is already behind us — fell past it, got knocked
-    ahead, whatever — and is skipped instead of walked back to. The final stretch keeps radius-greed as a
-    fallback net for anything the plan didn't list."""
+    """ITINERARY descent: walk the chain /descent_route stitched. The mod returns `itinerary` — the treasures
+    already ordered into ONE line, each stop priced from the PREVIOUS STOP rather than from the main line. That
+    is the fix for the frozen verdict: standing at a treasure 19 tiles off the line, a second one 2 tiles further
+    out used to stay written off as "too far", measured against a line the body had already left.
+
+    Python only walks the chain — it does not re-plan it. Progress still defers to the REAL descent field
+    (cost-to-hell H): a stop with higher H than the player is behind us — fell past it, got knocked ahead — and
+    is skipped rather than climbed back to. The final stretch keeps radius-greed as a net for anything unlisted."""
     r = mod_post("/descent_route", {"name": bname})
     if not r.get("found"):
         say("没找到下地狱的路线。")
         return True
-    plan = [t for t in (r.get("treasures") or []) if t.get("tier") == "main"]
-    plan.sort(key=lambda t: t.get("line_i", 0))
+    plan = r.get("itinerary") or []
     chests = sum(1 for t in plan if t["kind"] == "chest")
     say(f"沿主道下地狱,计划途中拿{len(plan)}个宝({chests}箱/{len(plan) - chests}水晶)。")
     grabbed = 0
     for t in plan:
         pos = _slim(mod_get("/state"))["pos"]
         ph = _descent_h(pos["x"], pos["y"])
-        jh = _descent_h(t["line_x"], t["line_y"])
-        if ph >= 0 and jh >= 0 and jh > ph + 30:
-            print(f"[descend] junction ({t['line_x']},{t['line_y']}) H{jh} > player H{ph} — already behind, skip")
+        th = _descent_h(t["x"], t["y"])
+        if ph >= 0 and th >= 0 and th > ph + 30:
+            print(f"[descend] stop ({t['x']},{t['y']}) H{th} > player H{ph} — already behind, skip")
             continue
-        nav = json.loads(run_tool("nav_to", {"x": t["line_x"], "y": t["line_y"]}))
-        st = nav.get("status")
-        if st == "interrupted":
-            say("(被打断,停下待命)"); return True
-        if not nav.get("done") and st != "done":
-            print(f"[descend] junction ({t['line_x']},{t['line_y']}) unreachable ({st}) — skip treasure")
-            continue
+        # straight to the treasure: the chain already priced the detour, so there is no junction hop first
         cat = "Containers" if t["kind"] == "chest" else "Heart"
         intr = _greed_collect(cat, t)
         if intr:
