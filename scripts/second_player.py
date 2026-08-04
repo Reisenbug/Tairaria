@@ -871,7 +871,7 @@ def _run_descend(bname):
         say("没找到下地狱的路线。", bot=True)
         return True
     plan = r.get("itinerary") or []
-    chests = sum(1 for t in plan if t["kind"] == "chest")
+    chests = sum(1 for t in plan if t["kind"] != "heart")
     say(f"沿主道下地狱,计划途中拿{len(plan)}个宝({chests}箱/{len(plan) - chests}水晶)。", bot=True)
     # 全程把计划贴出来,不然只能看着人乱跑猜它在干嘛
     for i, t in enumerate(plan):
@@ -891,7 +891,8 @@ def _run_descend(bname):
             missed += 1
             continue
         # straight to the treasure: the chain already priced the detour, so there is no junction hop first
-        cat = "Containers" if t["kind"] == "chest" else "Heart"
+        # kind 现在有 chest / wood_chest / heart 三种,木箱也是箱子 —— 别把它判成 Heart
+        cat = "Heart" if t["kind"] == "heart" else "Containers"
         outcome, intr = _greed_collect(cat, t)
         if outcome == "interrupted":
             say("(被打断,停下待命)", bot=True); return True
