@@ -857,6 +857,10 @@ def _descent_h(x, y):
         return -1
 
 
+# mod 的 kind → 报话里的名字。木箱是 Containers style 0,和金箱/常春藤箱那些分开的
+_KN = {"wood_chest": "木箱", "chest": "箱子", "heart": "水晶"}
+
+
 def _run_descend(bname):
     """ITINERARY descent: walk the chain /descent_route stitched. The mod returns `itinerary` — the treasures
     already ordered into ONE line, each stop priced from the PREVIOUS STOP rather than from the main line. That
@@ -871,12 +875,17 @@ def _run_descend(bname):
         say("没找到下地狱的路线。", bot=True)
         return True
     plan = r.get("itinerary") or []
-    chests = sum(1 for t in plan if t["kind"] != "heart")
-    say(f"沿主道下地狱,计划途中拿{len(plan)}个宝({chests}箱/{len(plan) - chests}水晶)。", bot=True)
+    plan_kind = {}
+    for t in plan:
+        plan_kind[t["kind"]] = plan_kind.get(t["kind"], 0) + 1
+    say(f"沿主道下地狱,计划途中拿{len(plan)}个宝("
+        + "、".join(f"{n}个{_KN.get(k, k)}" for k, n in sorted(plan_kind.items())) + ")。", bot=True)
     # 全程把计划贴出来,不然只能看着人乱跑猜它在干嘛
     for i, t in enumerate(plan):
         print(f"[descend] plan[{i}] {t['kind']} ({t['x']},{t['y']}) line_i={t.get('line_i')}")
-    grabbed = missed = 0
+    grabbed = missed = skipped = 0
+    # 拿到的按种类分开记,不然"收了13个宝"看不出是13个木箱还是13个水晶
+    got_kind = {}
     for i, t in enumerate(plan):
         pos = _slim(mod_get("/state"))["pos"]
         ph = _descent_h(pos["x"], pos["y"])
@@ -889,6 +898,7 @@ def _run_descend(bname):
         if ph >= 0 and th >= 0 and th > ph + 30:
             print(f"[descend]   SKIP — H{th} > 我的H{ph}+30,已经在身后了")
             missed += 1
+            skipped += 1
             continue
         # straight to the treasure: the chain already priced the detour, so there is no junction hop first
         # kind 现在有 chest / wood_chest / heart 三种,木箱也是箱子 —— 别把它判成 Heart
@@ -899,6 +909,7 @@ def _run_descend(bname):
         after = _slim(mod_get("/state"))["pos"]
         if outcome == "got":
             grabbed += 1
+            got_kind[t["kind"]] = got_kind.get(t["kind"], 0) + 1
             print(f"[descend]   GOT — 现在在 ({after['x']},{after['y']})")
         else:
             missed += 1
@@ -910,11 +921,19 @@ def _run_descend(bname):
     if st == "interrupted":
         say("(被打断,停下待命)", bot=True); return True
     # report the misses too. "收了4个" while silently failing another five is the report a player cannot act on.
-    tail = f",{missed}个没够着" if missed else ""
+    detail = "、".join(f"{n}个{_KN.get(k, k)}" for k, n in sorted(got_kind.items()))
+    body = f"收了{grabbed}个宝({detail})" if detail else f"收了{grabbed}个宝"
+    # 没拿到的分两种:SKIP=已经在身后了根本没去,MISS=去了没够着。混成一个数看不出该修哪边
+    tail = ""
+    if missed:
+        parts = []
+        if skipped: parts.append(f"{skipped}个在身后没去")
+        if missed - skipped: parts.append(f"{missed - skipped}个没够着")
+        tail = "," + "、".join(parts)
     if nav.get("done") or st == "done":
-        say(f"到地狱了,途中收了{grabbed}个宝{tail}。", bot=True)
+        say(f"到地狱了,途中{body}{tail}。", bot=True)
     else:
-        say(f"下降中断({st}),已收{grabbed}个宝{tail}。", bot=True)
+        say(f"下降中断({st}),已{body}{tail}。", bot=True)
     return True
 
 
