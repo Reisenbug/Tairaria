@@ -56,7 +56,7 @@ def throttle_llm():
     wait = MIN_CALL_GAP_S - (time.monotonic() - _last_llm_call)
     if wait > 0:
         print(f"⏳ 限流等待 {wait:.1f}s（RPM={RPM}，非模型卡顿）")
-        say(f"（配额限流，等 {wait:.0f} 秒再动，别急）") if wait >= 5 else None
+        say(f"（配额限流，等 {wait:.0f} 秒再动，别急）", bot=True) if wait >= 5 else None
         time.sleep(wait)
     _last_llm_call = time.monotonic()
 
@@ -69,12 +69,17 @@ def mod_get(path):
         return json.loads(r.read().decode())
 
 
+# 整条下地狱路线要跑两个全图多源 Dijkstra(70万/170万格)再逐段串宝藏,本来就是好几秒的活,
+# 不是卡住。10s 一刀切会把正常规划判成 mod 挂了(报 mod unreachable)。
+_SLOW = {"/descent_route": 90, "/find_descent": 60}
+
+
 def mod_post(path, payload):
     req = urllib.request.Request(
         f"{MOD}{path}", data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with _opener.open(req, timeout=10) as r:
+        with _opener.open(req, timeout=_SLOW.get(path, 10)) as r:
             return json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         try:
@@ -86,9 +91,10 @@ def mod_post(path, payload):
         return {"error": "mod_unreachable"}
 
 
-def say(text):
-    print(f"[TB says] {text}")
-    mod_post("/say", {"text": text})
+def say(text, bot=False):
+    """bot=True 是脚本硬编的进度播报(灰蓝),缺省是 LLM 自己写的话(橙)。"""
+    print(f"[TB {'bot' if bot else 'says'}] {text}")
+    mod_post("/say", {"text": text, "bot": bot})
 
 
 # ---------------- event channel (game ↔ agent, WebSocket on /ws) ----------------
@@ -485,22 +491,30 @@ def with_result(base, prev_inv):
 def _greed_collect(cat, t):
     """One side-trip for whitelisted loot while traveling: chest → open+loot, anything else → pick it out.
     Fails FAST — can't reach or can't dent means give up and move on; the journey matters more than any
-    single trinket. Returns an interrupted-result dict if the player spoke mid-trip (caller hands it up)."""
+    single trinket.
+
+    Returns ("interrupted", result) if the player spoke mid-trip (caller hands it up), ("got", None) when the
+    treasure is verifiably gone from the map, ("missed", None) otherwise. The caller must not infer success from
+    "no interruption": walking off a ledge on the way there ends the trip having collected nothing, and counting
+    that as a pickup is how a run reported four treasures it had not necessarily taken."""
     tx, ty = t["x"], t["y"]
-    say(f"顺路捡:{t.get('kind') or cat}({tx},{ty})")
+    say(f"顺路捡:{t.get('kind') or cat}({tx},{ty})", bot=True)
     nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))   # no greed here — side-trips don't nest
     if nav.get("status") == "interrupted":
-        return nav
+        return "interrupted", nav
     if not nav.get("done") and nav.get("status") != "done":
-        return None
+        return "missed", None
     if cat == "Containers":
         run_tool("interact", {"x": tx, "y": ty})
         run_tool("loot_all", {})
-    else:
-        slot = _best_tool_slot("pick")
-        run_tool("use_item", {"x": tx, "y": ty, "strict": True,
-                              "slot": slot if slot is not None else -1, "duration_ticks": 0})
-    return None
+        # a looted chest still stands there, so the map cannot confirm this one — trust the inventory instead
+        return "got", None
+    slot = _best_tool_slot("pick")
+    run_tool("use_item", {"x": tx, "y": ty, "strict": True,
+                          "slot": slot if slot is not None else -1, "duration_ticks": 0})
+    # a mined heart is GONE from the map: ask, don't assume
+    cell = mod_post("/probe_cell", {"x": tx, "y": ty})
+    return ("got" if not cell.get("has_tile") else "missed"), None
 
 
 def run_tool(name, args):
@@ -569,7 +583,7 @@ def run_tool(name, args):
                 hurt_times = [h for h in hurt_times if time.monotonic() - h < 10]
                 if len(hurt_times) >= 3:
                     mod_post("/nav_recede_stop", {})
-                    say("被缠上了,清一下怪再走。")
+                    say("被缠上了,清一下怪再走。", bot=True)
                     run_tool("fight", {"max_dist": 25, "seconds": 8})
                     hurt_times = []
                     resume = True
@@ -605,8 +619,8 @@ def run_tool(name, args):
                         cat, t = hit
                         visited.add((t["x"], t["y"]))
                         mod_post("/nav_recede_stop", {})
-                        intr = _greed_collect(cat, t)
-                        if intr:
+                        outcome, intr = _greed_collect(cat, t)
+                        if outcome == "interrupted":
                             return json.dumps(intr)   # player spoke during the side-trip — hand it up
                         resume = True
                         break
@@ -617,7 +631,7 @@ def run_tool(name, args):
                     pos = st.get("player", {}).get("pos", {})
                     px, py = pos.get("x", 0) / 16, pos.get("y", 0) / 16
                     dist = abs(px - args["x"]) + abs(py - args["y"])
-                    say(f"还在走,离目标还有约{int(dist)}格。")
+                    say(f"还在走,离目标还有约{int(dist)}格。", bot=True)
             if resume:
                 continue
             mod_post("/nav_recede_stop", {})
@@ -854,34 +868,52 @@ def _run_descend(bname):
     is skipped rather than climbed back to. The final stretch keeps radius-greed as a net for anything unlisted."""
     r = mod_post("/descent_route", {"name": bname})
     if not r.get("found"):
-        say("没找到下地狱的路线。")
+        say("没找到下地狱的路线。", bot=True)
         return True
     plan = r.get("itinerary") or []
     chests = sum(1 for t in plan if t["kind"] == "chest")
-    say(f"沿主道下地狱,计划途中拿{len(plan)}个宝({chests}箱/{len(plan) - chests}水晶)。")
-    grabbed = 0
-    for t in plan:
+    say(f"沿主道下地狱,计划途中拿{len(plan)}个宝({chests}箱/{len(plan) - chests}水晶)。", bot=True)
+    # 全程把计划贴出来,不然只能看着人乱跑猜它在干嘛
+    for i, t in enumerate(plan):
+        print(f"[descend] plan[{i}] {t['kind']} ({t['x']},{t['y']}) line_i={t.get('line_i')}")
+    grabbed = missed = 0
+    for i, t in enumerate(plan):
         pos = _slim(mod_get("/state"))["pos"]
         ph = _descent_h(pos["x"], pos["y"])
         th = _descent_h(t["x"], t["y"])
+        # 每一站都报:现在在哪、下一个目标是什么、离多远。这是唯一能看出"为什么没拿到"的东西
+        d = abs(pos["x"] - t["x"]) + abs(pos["y"] - t["y"])
+        note = f"[{i + 1}/{len(plan)}] 下一个:{t['kind']} ({t['x']},{t['y']}) 距{d}格 H{th}(我{ph})"
+        print(f"[descend] {note}")
+        say(note, bot=True)
         if ph >= 0 and th >= 0 and th > ph + 30:
-            print(f"[descend] stop ({t['x']},{t['y']}) H{th} > player H{ph} — already behind, skip")
+            print(f"[descend]   SKIP — H{th} > 我的H{ph}+30,已经在身后了")
+            missed += 1
             continue
         # straight to the treasure: the chain already priced the detour, so there is no junction hop first
         cat = "Containers" if t["kind"] == "chest" else "Heart"
-        intr = _greed_collect(cat, t)
-        if intr:
-            say("(被打断,停下待命)"); return True
-        grabbed += 1
+        outcome, intr = _greed_collect(cat, t)
+        if outcome == "interrupted":
+            say("(被打断,停下待命)", bot=True); return True
+        after = _slim(mod_get("/state"))["pos"]
+        if outcome == "got":
+            grabbed += 1
+            print(f"[descend]   GOT — 现在在 ({after['x']},{after['y']})")
+        else:
+            missed += 1
+            print(f"[descend]   MISS — 没到,停在 ({after['x']},{after['y']}),离目标还有 "
+                  f"{abs(after['x'] - t['x']) + abs(after['y'] - t['y'])} 格")
     nav = json.loads(run_tool("nav_to", {"x": r["hell_x"], "y": r["hell_y"],
                                          "greed": ["Containers", "Heart"]}))
     st = nav.get("status")
     if st == "interrupted":
-        say("(被打断,停下待命)"); return True
+        say("(被打断,停下待命)", bot=True); return True
+    # report the misses too. "收了4个" while silently failing another five is the report a player cannot act on.
+    tail = f",{missed}个没够着" if missed else ""
     if nav.get("done") or st == "done":
-        say(f"到地狱了,途中收了{grabbed}个宝。")
+        say(f"到地狱了,途中收了{grabbed}个宝{tail}。", bot=True)
     else:
-        say(f"下降中断({st}),已收{grabbed}个宝。")
+        say(f"下降中断({st}),已收{grabbed}个宝{tail}。", bot=True)
     return True
 
 
@@ -892,9 +924,9 @@ def _run_build_replay(anchor=None):
     req = {"ax": anchor[0], "ay": anchor[1]} if anchor else {}
     r = mod_post("/build_replay_start", req)
     if not r.get("ok"):
-        say(f"没法开始回放建造：{r.get('reason', '未知')}")
+        say(f"没法开始回放建造：{r.get('reason', '未知')}", bot=True)
         return True
-    say(f"开始回放建造（{r.get('events', '?')} 个事件，冲突 {r.get('conflicts', 0)} 格，淡色已画在屏幕上）。")
+    say(f"开始回放建造（{r.get('events', '?')} 个事件，冲突 {r.get('conflicts', 0)} 格，淡色已画在屏幕上）。", bot=True)
     last_note = time.monotonic()
     while True:
         time.sleep(0.5)
@@ -905,18 +937,18 @@ def _run_build_replay(anchor=None):
         st = mod_get("/build_replay_status")
         if not st.get("running"):
             say(f"建造回放结束：放置{st.get('placed', 0)}，挖掘{st.get('mined', 0)}，"
-                f"跳过{st.get('skipped', 0)}{('，' + st['fail_reason']) if st.get('fail_reason') else ''}。")
+                f"跳过{st.get('skipped', 0)}{('，' + st['fail_reason']) if st.get('fail_reason') else ''}。", bot=True)
             return True
         if time.monotonic() - last_note >= NAV_REPORT_S:
             last_note = time.monotonic()
-            say(f"还在盖：第{st.get('i', 0)}/{st.get('total', 0)}件。")
+            say(f"还在盖：第{st.get('i', 0)}/{st.get('total', 0)}件。", bot=True)
 
 
 def run_find_template(spec):
     """Run the ONE find-class skeleton from a filled variable table — no AI, no hallucinated ops.
     locate → nav → act → repeat until count/gather met. Returns True if it handled the goal, False to fall back."""
     if spec.get("say"):
-        say(spec["say"])
+        say(spec["say"], bot=True)
     what = spec.get("what")
     how = spec.get("how", "find")
     act = spec.get("act", "none")
@@ -940,12 +972,12 @@ def run_find_template(spec):
         if how == "find_descent":
             r = mod_post("/find_descent", {"name": what})
             if not r.get("found"):
-                say(f"没找到{what}的主入口。"); return True
+                say(f"没找到{what}的主入口。", bot=True); return True
             tx, ty = r["x"], r["y"]
         elif how == "find_biome":
             r = mod_post("/find_biome", {"name": what})
             if not r.get("found"):
-                say(f"没找到{what}。"); return True
+                say(f"没找到{what}。", bot=True); return True
             tx, ty = r["x"], r["y"]
         else:
             r = mod_post("/find_tiles", {"name": what, "n": 20, "max_dist": 400})
@@ -954,7 +986,7 @@ def run_find_template(spec):
                 tiles = [t for t in tiles if filt in str(t.get("kind", "")).lower()] or tiles
             tiles = [t for t in tiles if (t["x"], t["y"]) not in skip]
             if not tiles:
-                say(f"附近没有{('可到达的' if skip else '')}{what}了。"); return True
+                say(f"附近没有{('可到达的' if skip else '')}{what}了。", bot=True); return True
             tx, ty = tiles[0]["x"], tiles[0]["y"]
         print(f"[tmpl] locate → ({tx},{ty})")
 
@@ -999,7 +1031,7 @@ def run_find_template(spec):
                     # target_gone → already vanished, try the next candidate
                 print(f"[tmpl] mine batch → +{mined_here} in reach [{reach['lx']},{reach['ly']}..{reach['hx']},{reach['hy']}]")
             if done_count >= count:
-                say(f"搞定,{done_count}个。"); return True
+                say(f"搞定,{done_count}个。", bot=True); return True
             continue                              # cluster cleared → locate the next vein
         elif act == "chop":
             # tree: stand beside it, swing the axe until the trunk is REMOVED (or no_progress = can't dent it).
@@ -1008,7 +1040,7 @@ def run_find_template(spec):
                                                    "slot": slot if slot is not None else -1, "duration_ticks": 0}))
             print(f"[tmpl] act {act} → outcome={res.get('outcome')} snapped={res.get('snapped_to')} got={res.get('got')}")
             if res.get("outcome") == "no_progress":
-                say(f"这个砍不动({res.get('reason')})。"); return True
+                say(f"这个砍不动({res.get('reason')})。", bot=True); return True
             if res.get("outcome") != "removed":
                 # NOT removed (timeout/n/a/…) means this target did NOT actually fall — don't count it, skip & retry.
                 skip.add((tx, ty)); continue
@@ -1030,11 +1062,11 @@ def run_find_template(spec):
                 name, need = m.group(1).strip(), int(m.group(2))
                 have = _inv_snapshot().get(name, 0)
                 if have >= need:
-                    say(f"{name}够了({have})。"); return True
+                    say(f"{name}够了({have})。", bot=True); return True
                 continue
         if done_count >= count:
-            say(f"搞定,{done_count}个。"); return True
-    say(f"弄完了({done_count}个)。")
+            say(f"搞定,{done_count}个。", bot=True); return True
+    say(f"弄完了({done_count}个)。", bot=True)
     return True
 
 
@@ -1283,7 +1315,7 @@ def run_goal(goal):
     for attempt in range(3):   # initial plan + up to 2 replans, then give up (save RPM, ask player)
         say_txt, plan = plan_goal(goal, fail_ctx)
         if not plan:
-            say("我一时没想好怎么做,你能说得具体点吗?")
+            say("我一时没想好怎么做,你能说得具体点吗?", bot=True)
             return
         if say_txt:
             say(say_txt)
@@ -1294,7 +1326,7 @@ def run_goal(goal):
             # interruptible between ops
             interrupt = next_instruction(block=False)
             if interrupt:
-                say("好,先停,你说。")
+                say("好,先停,你说。", bot=True)
                 _pending_instructions.append(interrupt)
                 return
             print(f"[op {i+1}/{len(plan)}] {op}")
@@ -1309,7 +1341,7 @@ def run_goal(goal):
             done.append(op.get("op"))
         else:
             return   # whole plan ran without failure — done
-    say("试了几次没成,这个我先卡住了,你看看?")
+    say("试了几次没成,这个我先卡住了,你看看?", bot=True)
 
 
 _pending_instructions = []   # instructions caught mid-plan, re-fed to the main loop
@@ -1364,7 +1396,7 @@ def run_task(history):
             print(f"[llm] {time.monotonic() - t0:.1f}s{tok}")
         except Exception as e:
             print(f"[llm error] {e}")
-            say("我这边出了点问题,稍后再试。")
+            say("我这边出了点问题,稍后再试。", bot=True)
             return False
 
         msg = resp.choices[0].message
@@ -1392,7 +1424,7 @@ def run_task(history):
             print(f"[tool<] {tc.function.name} -> {out[:300]}")
             history.append({"role": "tool", "tool_call_id": tc.id, "content": out})
 
-    say("这个任务步骤太多,我先停下了。需要的话再叫我继续。")
+    say("这个任务步骤太多,我先停下了。需要的话再叫我继续。", bot=True)
     return False
 
 
@@ -1411,7 +1443,7 @@ def main():
             continue
         if not greeted:
             greeted = True
-            say("我上线了,用 /tb 指挥我。")
+            say("我上线了,用 /tb 指挥我。", bot=True)
 
         # single instruction source: next_instruction() merges the WS queue + HTTP fallback, consuming exactly once.
         ins = _pending_instructions.pop(0) if _pending_instructions else next_instruction(block=False)
@@ -1433,7 +1465,7 @@ def release_game():
         except Exception:
             pass
     try:
-        say("我下线了。")
+        say("我下线了。", bot=True)
     except Exception:
         pass
 
