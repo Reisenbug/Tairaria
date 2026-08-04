@@ -378,8 +378,19 @@ TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "物品名(英文,如 'Iron Pickaxe')"},
+                "name": {"type": "string", "description": "物品名。中文显示名('工作台')或英文内部名('WorkBench'/'Work Bench')都行"},
                 "amount": {"type": "integer", "description": "数量,默认1"},
+            },
+            "required": ["name"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "recipe",
+        "description": "查一个物品的配方:要什么材料(每样带 need 要多少 / have 你现在有多少)、要站在哪种工作台旁(stations,空=徒手可做)。没材料的物品也能查——这是查配方,不是查能不能做。要凑齐一批东西时先用它算清楚缺什么,别去猜也别翻wiki。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "物品名。中文('绳子')或英文内部名('Rope')都行"},
             },
             "required": ["name"],
         },
@@ -709,6 +720,8 @@ def run_tool(name, args):
         prev_inv = _inv_snapshot()
         r = mod_post("/craft", {"item_name": args["name"], "amount": args.get("amount", 1)})
         return with_result(r, prev_inv)
+    if name == "recipe":
+        return json.dumps(mod_post("/recipe", {"name": args["name"]}), ensure_ascii=False)
     if name == "ask":
         say(args["question"])
         answer = next_instruction(block=True)   # BLOCK the task until the player replies with /tb
@@ -736,8 +749,15 @@ SYSTEM = """你是 TB,Terraria 里的 AI 二号玩家,和人类搭档。接到�
 - 寻路或动作失败,如实告诉玩家原因,提替代方案。
 - 玩家能随时打断:工具返回 status=interrupted 时,先回应,再按新意思决定继续/改向/干别的。
 
-知识:你的 Terraria 记忆不可靠。配方、掉落、数值、召唤条件一律 wiki_search + wiki_page 查官方 wiki。
+知识:你的 Terraria 记忆不可靠。配方先用 recipe 工具查(它直接告诉你要什么材料、还差多少、要哪个工作台);
+掉落、数值、召唤条件这类 recipe 查不到的,用 wiki_search + wiki_page 查官方 wiki。
 只有"大方向怎么打"这类策略可以自己想。
+
+下地狱前的物资底线(玩家算的账,按这个备):
+- 木材 125(工作台1、桌子3、椅子4、墙96、平台等都从木材来),赶路还要额外平台,所以木头多多益善
+- 绳子 20
+- 火把 4
+绳子和火把不是纯木头做的,先 recipe 查清楚缺什么再去找。备齐了再谈下地狱。
 """
 
 
@@ -759,7 +779,7 @@ PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 +
 - {"op":"use","at":"$t.pos","tool":"axe|pick|hammer"}  用工具作用于某格(砍/挖);挖到为止,不用给时间
 - {"op":"use","at":[x,y],"slot":N}                  放方块到某格;放到为止,不用给时间。slot 抄现状 items 的 slot 字段,别猜
 - {"op":"use","slot":N,"dur":30}                      对自己用的道具(传送杖/喝药/召唤),不带 at;这类才需要 dur
-- {"op":"craft","name":"<中文物品名>","amount":N}     合成
+- {"op":"craft","name":"<物品名,中英文都行>","amount":N}  合成(要站在对应工作台旁)
 - {"op":"interact","at":"$c.pos"}                     开箱/开门/机关
 - {"op":"loot"}                                       捡光当前箱子
 - {"op":"fight","max_dist":25,"seconds":10}           清怪
