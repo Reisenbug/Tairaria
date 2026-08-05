@@ -898,22 +898,26 @@ def _run_descend(bname):
     if not r.get("found"):
         say("没找到下地狱的路线。", bot=True)
         return True
-    # 路上有什么,先数清楚。木箱太少就放宽挖掘额度再查一次(默认木箱只肯挖15格)
+    # 路上有什么先数清楚。绳子从任何箱子都能开,不必执着木箱 —— 箱子总数太少才放宽挖掘额度重查
     def _tally(rr):
         c = {}
         for t in (rr.get("treasures") or []):
             if t.get("tier"):
                 c[t["kind"]] = c.get(t["kind"], 0) + 1
         return c
+
+    def _chests(c):
+        return c.get("chest", 0) + c.get("wood_chest", 0)
+
     tal = _tally(r)
-    print(f"[descend] 路上: " + ", ".join(f"{_KN.get(k,k)}×{v}" for k, v in sorted(tal.items())) or "[descend] 路上啥也没有")
-    if tal.get("wood_chest", 0) < 2:
+    print("[descend] 路上: " + (", ".join(f"{_KN.get(k,k)}×{v}" for k, v in sorted(tal.items())) or "啥也没有"))
+    if _chests(tal) < 6:
         r2 = mod_post("/descent_route", {"name": bname, "dig_max": 30, "dig_max2": 40})
         if r2.get("found"):
             t2 = _tally(r2)
-            print(f"[descend] 木箱只有{tal.get('wood_chest',0)}个,放宽到挖30格 → "
+            print(f"[descend] 箱子只有{_chests(tal)}个,放宽到挖30格 → "
                   + ", ".join(f"{_KN.get(k,k)}×{v}" for k, v in sorted(t2.items())))
-            if t2.get("wood_chest", 0) > tal.get("wood_chest", 0):
+            if _chests(t2) > _chests(tal):
                 r, tal = r2, t2
     plan = r.get("itinerary") or []
     plan_kind = {}
