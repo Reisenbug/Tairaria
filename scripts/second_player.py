@@ -390,7 +390,7 @@ TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "物品名。中文('绳子')或英文内部名('Rope')都行"},
+                "name": {"type": "string", "description": "物品名。中文('绳')或英文内部名('Rope')都行"},
             },
             "required": ["name"],
         },
@@ -757,10 +757,9 @@ SYSTEM = """你是 TB,Terraria 里的 AI 二号玩家,和人类搭档。接到�
 - 木材 125(工作台1、桌子3、椅子4、墙96、平台等都从木材来),赶路还要额外平台,所以木头多多益善
 - 绳子 20
 - 火把 4
-火把:1凝胶+1木材出3个,凝胶打史莱姆掉。
-绳子:【合不出来】,只能开箱子和砸罐子得到。罐子 tile 名 Pots,在洞穴里,
-用镐或武器打罐子那一格就碎(use_item 对着它用,removed 就是砸了),掉落自动进包。
-备齐了再谈下地狱。
+绳子和火把都【合不出来】(火把要凝胶,这个世界关了刷怪没得打),只能开箱子和砸罐子。
+罐子 tile 名 Pots,在洞穴里,用镐或武器打那一格就碎(use_item 判 removed),掉落自动进包。
+开够了就走,开不出来也别耗着。
 """
 
 
@@ -966,7 +965,7 @@ def _run_descend(bname):
 
 RUN1_BUILD_WOOD = 125      # 建房
 RUN1_ROAD_WOOD = 75        # 赶路的平台,1木材出2个
-RUN1_NEED = {"木材": RUN1_BUILD_WOOD + RUN1_ROAD_WOOD, "绳子": 20, "火把": 4}
+RUN1_NEED = {"木材": RUN1_BUILD_WOOD + RUN1_ROAD_WOOD, "绳": 20, "火把": 4}
 
 
 def _have(name):
@@ -1031,11 +1030,11 @@ def _run_from_zero():
     say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
 
     # ── 2. 开箱子拿绳子(合不出来,罐子靠赶路时 SmashPot 顺手砸)──────────────
-    if _have("绳子") < RUN1_NEED["绳子"]:
-        say(f"找箱子拿绳子(现在{_have('绳子')}/{RUN1_NEED['绳子']})。", bot=True)
-        if _gather_by("Containers", "open", "绳子", RUN1_NEED["绳子"]) is None:
+    if _have("绳") < RUN1_NEED["绳"]:
+        say(f"找箱子拿绳子(现在{_have('绳')}/{RUN1_NEED['绳']})。", bot=True)
+        if _gather_by("Containers", "open", "绳", RUN1_NEED["绳"]) is None:
             return True
-    say(f"绳子{_have('绳子')}、火把{_have('火把')}、金币{_have('金币')}。", bot=True)
+    say(f"绳子{_have('绳')}、火把{_have('火把')}、金币{_have('金币')}。", bot=True)
 
     # ── 3. 地表盖房 ──────────────────────────────────────────────────────────
     say("在这儿盖房子。", bot=True)
