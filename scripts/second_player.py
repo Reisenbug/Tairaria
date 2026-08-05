@@ -1027,6 +1027,9 @@ def _run_from_zero():
     if spare > 0:
         r = mod_post("/craft", {"item_name": "WoodPlatform", "amount": spare})
         print(f"[run1] craft platform ×{spare} → {r}")
+        if r.get("free_slots") == 0:
+            say("背包满了,合不了平台 —— 先清一下包。", bot=True)
+            return True
     say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
 
     # ── 2. 开箱子拿绳子(合不出来,罐子靠赶路时 SmashPot 顺手砸)──────────────
@@ -1038,11 +1041,24 @@ def _run_from_zero():
 
     # ── 3. 地表盖房 ──────────────────────────────────────────────────────────
     say("在这儿盖房子。", bot=True)
-    if _run_build_replay() is not True:
+    r = mod_post("/build_replay_start", {})
+    if not r.get("ok"):
+        say(f"盖不了({r.get('reason')}),先不下地狱了。", bot=True)
         return True
+    say(f"开始盖({r.get('events','?')}个事件)。", bot=True)
+    while True:
+        time.sleep(0.5)
+        if next_instruction(block=False):
+            mod_post("/build_replay_stop", {})
+            return True
+        st = mod_get("/build_replay_status")
+        if not st.get("running"):
+            say(f"盖完了:放置{st.get('placed',0)},挖掘{st.get('mined',0)},"
+                f"跳过{st.get('skipped',0)}{(',' + st['fail_reason']) if st.get('fail_reason') else ''}。", bot=True)
+            break
 
     # ── 4. 下地狱 ────────────────────────────────────────────────────────────
-    say("盖完了,下地狱。", bot=True)
+    say("下地狱。", bot=True)
     return _run_descend("jungle")
 
 
