@@ -972,6 +972,27 @@ def _have(name):
     return _inv_snapshot().get(name, 0)
 
 
+def _tallest_trunks(tiles, skip):
+    """把 find_tiles 的树格按「同一列 y 连续」切成一棵棵树干,高的排前面。
+    一棵树砍一下整棵倒,所以砍高的效率高得多;h=1 的那些是树枝树叶。"""
+    col = {}
+    for t in tiles:
+        col.setdefault(t["x"], []).append((t["y"], t["dist"]))
+    runs = []
+    for x, ys in col.items():
+        ys.sort()
+        s = 0
+        for i in range(1, len(ys) + 1):
+            if i == len(ys) or ys[i][0] != ys[i - 1][0] + 1:
+                seg = ys[s:i]
+                base = seg[-1][0]                     # 树干底部,砍这里
+                if (x, base) not in skip:
+                    runs.append((len(seg), -min(d for _, d in seg), x, base))
+                s = i
+    runs.sort(reverse=True)                            # 高度降序,同高取近的
+    return [(x, y) for _, _, x, y in runs]
+
+
 def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
     """找最近的 what → 走过去 → 对它做 act,直到 need_name 够 need_n。
     True=够了 / False=没得找了 / None=被打断。"""
@@ -981,11 +1002,18 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
         have = _have(need_name)
         if have >= need_n:
             return True
-        r = mod_post("/find_tiles", {"name": what, "n": 20, "max_dist": max_dist})
+        n = 60 if act == "chop" else 20
+        r = mod_post("/find_tiles", {"name": what, "n": n, "max_dist": max_dist})
         tiles = [t for t in (r.get("tiles") or []) if (t["x"], t["y"]) not in skip]
         if not tiles:
             return False
-        tx, ty = tiles[0]["x"], tiles[0]["y"]
+        if act == "chop":
+            trunks = _tallest_trunks(tiles, skip)
+            if not trunks:
+                return False
+            tx, ty = trunks[0]
+        else:
+            tx, ty = tiles[0]["x"], tiles[0]["y"]
         nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))
         if nav.get("status") in ("walled_in", "loop_unresolved", "timeout", "failed"):
             skip.add((tx, ty))
