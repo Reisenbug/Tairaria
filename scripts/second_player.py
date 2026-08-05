@@ -851,7 +851,9 @@ what 只填要去世界上找的目标,永远别把背包里的材料名(Rope/Wo
 开金箱=what:Containers,act:open,filter:Gold Chest。tile名不确定就用常见的。只输出 JSON。"""
 
 
-_ACT_TOOL = {"chop": "axe", "mine": "pick"}       # act → which tool kind to auto-pick
+# act → which tool kind to auto-pick。smash(砸罐子)和 chop 同构:对着那格用工具,判 removed。
+# 罐子用镐或武器都能砸,这里用镐(开局必有,且不会打空).
+_ACT_TOOL = {"chop": "axe", "mine": "pick", "smash": "pick"}
 
 
 def classify_find(goal):
@@ -958,6 +960,91 @@ def _run_descend(bname):
     else:
         say(f"下降中断({st}),已{body}{tail}。", bot=True)
     return True
+
+
+# ============================ /tb 1 = 从零到地狱(纯代码,不调 LLM)============================
+
+RUN1_BUILD_WOOD = 125      # 建房
+RUN1_ROAD_WOOD = 75        # 赶路的平台,1木材出2个
+RUN1_NEED = {"木材": RUN1_BUILD_WOOD + RUN1_ROAD_WOOD, "绳子": 20, "火把": 4}
+
+
+def _have(name):
+    return _inv_snapshot().get(name, 0)
+
+
+def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
+    """找最近的 what → 走过去 → 对它做 act,直到 need_name 够 need_n。
+    True=够了 / False=没得找了 / None=被打断。"""
+    skip = set()
+    acted = 0
+    for _ in range(rounds):
+        have = _have(need_name)
+        if have >= need_n:
+            return True
+        r = mod_post("/find_tiles", {"name": what, "n": 20, "max_dist": max_dist})
+        tiles = [t for t in (r.get("tiles") or []) if (t["x"], t["y"]) not in skip]
+        if not tiles:
+            return False
+        tx, ty = tiles[0]["x"], tiles[0]["y"]
+        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))
+        if nav.get("status") in ("walled_in", "loop_unresolved", "timeout", "failed"):
+            skip.add((tx, ty))
+            continue
+        if nav.get("status") == "interrupted":
+            return None
+        if act == "open":
+            run_tool("interact", {"x": tx, "y": ty})
+            run_tool("loot_all", {})
+        else:
+            slot = _best_tool_slot(_ACT_TOOL.get(act, "pick"))
+            res = json.loads(run_tool("use_item", {"x": tx, "y": ty, "strict": act == "smash",
+                                                   "slot": slot if slot is not None else -1,
+                                                   "duration_ticks": 0}))
+            if res.get("outcome") != "removed":
+                skip.add((tx, ty))
+        got = _have(need_name)
+        print(f"[run1] {act} ({tx},{ty}) → {need_name}={got}/{need_n}")
+        acted += 1   # 打了半天一个没进包 = 物品名对不上,别干转
+        if acted >= 6 and got == 0:
+            say(f"打了{acted}个{what}但「{need_name}」一个没进包 —— 多半是物品名对不上,停。", bot=True)
+            return False
+    return _have(need_name) >= need_n
+
+
+def _run_from_zero():
+    """/tb 1 — 一条写死的流程:备料 → 地表盖房 → 下地狱。全程不问 LLM。"""
+    say("开工:先砍木头备料,再盖房子,然后下地狱。", bot=True)
+
+    # ── 1. 木材 ──────────────────────────────────────────────────────────────
+    if _have("木材") < RUN1_NEED["木材"]:
+        say(f"先砍树,要{RUN1_NEED['木材']}木材。", bot=True)
+        ok = _gather_by("Trees", "chop", "木材", RUN1_NEED["木材"])
+        if ok is None:
+            return True
+        if not ok:
+            say(f"附近树砍完了,木材只有{_have('木材')}。", bot=True)
+    spare = max(0, _have("木材") - RUN1_BUILD_WOOD)
+    if spare > 0:
+        r = mod_post("/craft", {"item_name": "WoodPlatform", "amount": spare})
+        print(f"[run1] craft platform ×{spare} → {r}")
+    say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
+
+    # ── 2. 开箱子拿绳子(合不出来,罐子靠赶路时 SmashPot 顺手砸)──────────────
+    if _have("绳子") < RUN1_NEED["绳子"]:
+        say(f"找箱子拿绳子(现在{_have('绳子')}/{RUN1_NEED['绳子']})。", bot=True)
+        if _gather_by("Containers", "open", "绳子", RUN1_NEED["绳子"]) is None:
+            return True
+    say(f"绳子{_have('绳子')}、火把{_have('火把')}、金币{_have('金币')}。", bot=True)
+
+    # ── 3. 地表盖房 ──────────────────────────────────────────────────────────
+    say("在这儿盖房子。", bot=True)
+    if _run_build_replay() is not True:
+        return True
+
+    # ── 4. 下地狱 ────────────────────────────────────────────────────────────
+    say("盖完了,下地狱。", bot=True)
+    return _run_descend("jungle")
 
 
 def _run_build_replay(anchor=None):
@@ -1076,8 +1163,9 @@ def run_find_template(spec):
             if done_count >= count:
                 say(f"搞定,{done_count}个。", bot=True); return True
             continue                              # cluster cleared → locate the next vein
-        elif act == "chop":
+        elif act in ("chop", "smash"):
             # tree: stand beside it, swing the axe until the trunk is REMOVED (or no_progress = can't dent it).
+            # smash(罐子)同构:对着那格抡镐,罐子碎了那格就没了 —— 判据同样是 removed,掉落自动进包。
             slot = _best_tool_slot(_ACT_TOOL[act])
             res = json.loads(run_tool("use_item", {"x": tx, "y": ty,
                                                    "slot": slot if slot is not None else -1, "duration_ticks": 0}))
@@ -1347,6 +1435,11 @@ def run_goal(goal):
     variable table and code runs the fixed skeleton — no hallucinated ops. FALLBACK: 甲方案 free planning for
     everything else. Understanding intent is the BRAIN's job; code only guarantees execution after routing."""
     drain_stale_instructions()
+
+    # 纯代码触发的写死流程,一次 LLM 都不调 —— 在分类之前拦掉
+    if goal.strip() == "1":
+        _run_from_zero()
+        return
 
     spec = classify_find(goal)
     if spec:
