@@ -898,6 +898,23 @@ def _run_descend(bname):
     if not r.get("found"):
         say("没找到下地狱的路线。", bot=True)
         return True
+    # 路上有什么,先数清楚。木箱太少就放宽挖掘额度再查一次(默认木箱只肯挖15格)
+    def _tally(rr):
+        c = {}
+        for t in (rr.get("treasures") or []):
+            if t.get("tier"):
+                c[t["kind"]] = c.get(t["kind"], 0) + 1
+        return c
+    tal = _tally(r)
+    print(f"[descend] 路上: " + ", ".join(f"{_KN.get(k,k)}×{v}" for k, v in sorted(tal.items())) or "[descend] 路上啥也没有")
+    if tal.get("wood_chest", 0) < 8:
+        r2 = mod_post("/descent_route", {"name": bname, "dig_max": 30, "dig_max2": 40})
+        if r2.get("found"):
+            t2 = _tally(r2)
+            print(f"[descend] 木箱只有{tal.get('wood_chest',0)}个,放宽到挖30格 → "
+                  + ", ".join(f"{_KN.get(k,k)}×{v}" for k, v in sorted(t2.items())))
+            if t2.get("wood_chest", 0) > tal.get("wood_chest", 0):
+                r, tal = r2, t2
     plan = r.get("itinerary") or []
     plan_kind = {}
     for t in plan:
@@ -972,6 +989,20 @@ def _have(name):
     return _inv_snapshot().get(name, 0)
 
 
+def _wait_pickup(name, quiet_s=1.5, max_s=8):
+    """站着等掉落物飞进包:数量还在涨就继续等,连着 quiet_s 不动了才走。"""
+    last, t0 = _have(name), time.monotonic()
+    still = time.monotonic()
+    while time.monotonic() - t0 < max_s:
+        time.sleep(0.4)
+        now = _have(name)
+        if now != last:
+            last, still = now, time.monotonic()
+        elif time.monotonic() - still >= quiet_s:
+            break
+    return last
+
+
 def _tallest_trunks(tiles, skip):
     """把 find_tiles 的树格按「同一列 y 连续」切成一棵棵树干,高的排前面。
     一棵树砍一下整棵倒,所以砍高的效率高得多;h=1 的那些是树枝树叶。"""
@@ -1030,12 +1061,11 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
                                                    "duration_ticks": 0}))
             if res.get("outcome") != "removed":
                 skip.add((tx, ty))
+        if act == "chop":
+            _wait_pickup(need_name)
         got = _have(need_name)
         print(f"[run1] {act} ({tx},{ty}) → {need_name}={got}/{need_n}")
-        acted += 1   # 打了半天一个没进包 = 物品名对不上,别干转
-        if acted >= 6 and got == 0:
-            say(f"打了{acted}个{what}但「{need_name}」一个没进包 —— 多半是物品名对不上,停。", bot=True)
-            return False
+        acted += 1
     return _have(need_name) >= need_n
 
 
@@ -1060,16 +1090,27 @@ def _run_from_zero():
             return True
     say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
 
-    # ── 2. 开箱子拿绳子(合不出来,罐子靠赶路时 SmashPot 顺手砸)──────────────
-    if _have("绳") < RUN1_NEED["绳"]:
-        say(f"找箱子拿绳子(现在{_have('绳')}/{RUN1_NEED['绳']})。", bot=True)
-        if _gather_by("Containers", "open", "绳", RUN1_NEED["绳"]) is None:
+    # ── 2. 地表盖房 ──────────────────────────────────────────────────────────
+    # 绳子不在这儿找:箱子沿下地狱的主道顺路开(descent_route 已经按 dig 额度筛过),
+    # 罐子靠赶路时 SmashPot 顺手砸。专门跑去挖一个地下箱子要挖几十格,不值。
+    # 房子占的格子不能和现有方块重合。start 会返回 conflicts,冲突多就沿地表挪一段再试
+    pos = _slim(mod_get("/state"))["pos"]
+    best = None
+    for dx in (0, 14, -14, 28, -28, 42, -42):
+        probe = mod_post("/build_replay_start", {"ax": pos["x"] + dx, "ay": pos["y"]})
+        if not probe.get("ok"):
+            say(f"盖不了({probe.get('reason')}),先不下地狱了。", bot=True)
             return True
-    say(f"绳子{_have('绳')}、火把{_have('火把')}、金币{_have('金币')}。", bot=True)
-
-    # ── 3. 地表盖房 ──────────────────────────────────────────────────────────
-    say("在这儿盖房子。", bot=True)
-    r = mod_post("/build_replay_start", {})
+        c = probe.get("conflicts", 0)
+        print(f"[run1] 房址 x{pos['x']+dx:+d} → 冲突{c}格")
+        if best is None or c < best[1]:
+            best = (dx, c)
+        mod_post("/build_replay_stop", {})
+        if c == 0:
+            break
+    if best[1] > 0:
+        say(f"找不到完全空的地方,挑了冲突最少的({best[1]}格)。", bot=True)
+    r = mod_post("/build_replay_start", {"ax": pos["x"] + best[0], "ay": pos["y"]})
     if not r.get("ok"):
         say(f"盖不了({r.get('reason')}),先不下地狱了。", bot=True)
         return True
