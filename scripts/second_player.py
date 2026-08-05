@@ -907,7 +907,7 @@ def _run_descend(bname):
         return c
     tal = _tally(r)
     print(f"[descend] 路上: " + ", ".join(f"{_KN.get(k,k)}×{v}" for k, v in sorted(tal.items())) or "[descend] 路上啥也没有")
-    if tal.get("wood_chest", 0) < 8:
+    if tal.get("wood_chest", 0) < 2:
         r2 = mod_post("/descent_route", {"name": bname, "dig_max": 30, "dig_max2": 40})
         if r2.get("found"):
             t2 = _tally(r2)
@@ -989,18 +989,19 @@ def _have(name):
     return _inv_snapshot().get(name, 0)
 
 
-def _wait_pickup(name, quiet_s=1.5, max_s=8):
-    """站着等掉落物飞进包:数量还在涨就继续等,连着 quiet_s 不动了才走。"""
-    last, t0 = _have(name), time.monotonic()
-    still = time.monotonic()
+def _wait_pickup(max_s=8):
+    """站着等地上的掉落物被吸完。砍完那一瞬掉落物还没生成,所以空了也先等半秒再确认。"""
+    t0 = time.monotonic()
+    empty_since = None
     while time.monotonic() - t0 < max_s:
-        time.sleep(0.4)
-        now = _have(name)
-        if now != last:
-            last, still = now, time.monotonic()
-        elif time.monotonic() - still >= quiet_s:
-            break
-    return last
+        if mod_get("/state").get("dropped_items"):
+            empty_since = None
+        elif empty_since is None:
+            empty_since = time.monotonic()
+        elif time.monotonic() - empty_since >= 0.6:
+            return True
+        time.sleep(0.3)
+    return False
 
 
 def _tallest_trunks(tiles, skip):
@@ -1062,7 +1063,7 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
             if res.get("outcome") != "removed":
                 skip.add((tx, ty))
         if act == "chop":
-            _wait_pickup(need_name)
+            _wait_pickup()
         got = _have(need_name)
         print(f"[run1] {act} ({tx},{ty}) → {need_name}={got}/{need_n}")
         acted += 1
