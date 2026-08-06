@@ -576,6 +576,7 @@ def run_tool(name, args):
         greed = [g for g in (args.get("greed") or []) if isinstance(g, str)]
         visited = set()          # loot we already grabbed or gave up on — never circle back
         while True:
+            _top_up_platforms()   # 平台是寻路的耗材,每段路开始前补一次
             r = mod_post("/nav_recede", req)
             if not r.get("ok"):
                 return json.dumps(r)
@@ -1252,17 +1253,18 @@ def _build_house():
     return None
 
 
-def _top_up_platforms():
+def _top_up_platforms(reserve=0):
     """平台少于 PLAT_LOW 就补到 PLAT_HIGH。amount 是合成次数,1次吃1木材出2平台。
-    赶路一路铺平台,开局搓一次是不够的 —— 每次要用之前调一下。"""
+    平台是寻路的耗材,一路铺一路少,所以每段路之前都要补,不能只在开局搓一次。
+    reserve = 要留着不动的木材(盖房前留 125,赶路时不用留)。"""
     have = _have("木平台")
     if have >= PLAT_LOW:
         return have
     times = (PLAT_HIGH - have + 1) // 2
     wood = _have("木材")
-    times = min(times, max(0, wood - RUN1_BUILD_WOOD))
+    times = min(times, max(0, wood - reserve))
     if times <= 0:
-        print(f"[run1] 平台{have},想补但木材只有{wood}")
+        print(f"[run1] 平台{have},想补但木材只有{wood}(留{reserve})")
         return have
     r = mod_post("/craft", {"item_name": "WoodPlatform", "amount": times})
     now = _have("木平台")
@@ -1284,7 +1286,7 @@ def _run_from_zero():
             return True
         if not ok:
             say(f"附近树砍完了,木材只有{_have('木材')}。", bot=True)
-    _top_up_platforms()
+    _top_up_platforms(RUN1_BUILD_WOOD)
     say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
 
     # ── 2. 绳子 ──────────────────────────────────────────────────────────────
@@ -1328,7 +1330,7 @@ def _run_from_zero():
         return True
 
     say("开始盖房子。", bot=True)
-    _top_up_platforms()
+    _top_up_platforms(RUN1_BUILD_WOOD)
     err = _build_house()
     if err:
         say(f"房子没盖成:{err}", bot=True)
