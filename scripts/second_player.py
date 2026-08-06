@@ -1107,6 +1107,7 @@ def _build_house():
     if not r.get("accepted"):
         return f"绳梯被拒:{r}"
     st = _hwait("/rope_ladder_status", 90)
+    print(f"[house] rope → {st}")
     if st.get("placed", 0) + st.get("already_there", 0) < H_LEN:
         return f"绳梯没搭够:{st.get('placed')}"
     above = st.get("above_top")
@@ -1126,7 +1127,7 @@ def _build_house():
         return f"没站上平台:cy={o.get('cy')} 应为 {ay-1}"
 
     mod_post("/bridge", {"item": str(H_WOOD), "dir": "right", "n": H_LEN})
-    _hwait("/bridge_status", 120)
+    print(f"[house] bridge → {_hwait('/bridge_status', 120)}")
     row = ay
     missing = [ax + k for k in range(1, H_LEN + 1) if not _hprobe(ax + k, row).get("has_tile")]
     if missing:
@@ -1135,6 +1136,7 @@ def _build_house():
     end_x = ax + H_LEN
     mod_post("/pillar", {"item": str(H_FLOOR), "n": H_PILLAR, "col": end_x})
     st = _hwait("/pillar_status", 90)
+    print(f"[house] pillar col={end_x} → {st}")
     if st.get("placed", 0) < H_PILLAR:
         return f"柱子没搭够:{st.get('placed')}"
 
@@ -1148,7 +1150,7 @@ def _build_house():
 
     roof_row = o["cy"] + 1
     mod_post("/bridge", {"item": str(H_FLOOR), "dir": "left", "n": H_ROOF})
-    _hwait("/bridge_status", 120)
+    print(f"[house] roof → {_hwait('/bridge_status', 120)}")
     miss_r = [end_x - k for k in range(1, H_ROOF + 1) if not _hprobe(end_x - k, roof_row).get("has_tile")]
     if miss_r:
         return f"屋顶缺 {len(miss_r)} 格"
@@ -1163,7 +1165,7 @@ def _build_house():
         mod_post("/settle", {"col": wx(anchor_lx)}); _hwait("/settle_status", 30)
         for plx in pillar_lxs:
             mod_post("/pillar", {"item": str(H_FLOOR), "n": H_SUP, "col": wx(plx)})
-            _hwait("/pillar_status", 90)
+            print(f"[house] support x{plx} → {_hwait('/pillar_status', 90)}")
 
     mod_post("/settle", {"col": wx(19)}); _hwait("/settle_status", 30)
     o = mod_post("/origin", {})
@@ -1179,27 +1181,37 @@ def _build_house():
 
     have = _held()
     if have.get(H_WORKBENCH, 0) < 1:
-        mod_post("/craft", {"item_id": H_WORKBENCH, "amount": 1})
+        r = mod_post("/craft", {"item_id": H_WORKBENCH, "amount": 1})
+        print(f"[house] craft workbench → {r}")
         have = _held()
     mod_post("/settle", {"col": wx(19)}); _hwait("/settle_status", 30)
     mod_post("/place_at", {"item": str(H_WORKBENCH), "world": [wx(19), floor_row]})
-    _hwait("/place_at_status", 20)
+    st = _hwait("/place_at_status", 20)
+    print(f"[house] place workbench @({wx(19)},{floor_row}) → {st}")
+    if not _hprobe(wx(19), floor_row).get("has_tile"):
+        return f"工作台没放上 ({wx(19)},{floor_row}):{st}"
 
     for _ in range(40):     # 工作台放下后配方要几帧才出现
         if any(rc.get("item_id") == H_TABLE for rc in mod_get("/state").get("available_recipes", [])):
             break
         time.sleep(0.1)
-    for item, need in ((H_TABLE, 3), (H_CHAIR, 4), (H_WALL, 96)):
+    else:
+        return "工作台放下了但木桌配方没出现 —— 站得太远?"
+    for item, need, nm in ((H_TABLE, 3, "木桌"), (H_CHAIR, 4, "木椅"), (H_WALL, 96, "木墙")):
         short = need - have.get(item, 0)
         if short > 0:
-            mod_post("/craft", {"item_id": item, "amount": short})
+            r = mod_post("/craft", {"item_id": item, "amount": short})
+            print(f"[house] craft {nm} ×{short} → {r}")
+        got = _held().get(item, 0)
+        if got < need:
+            return f"{nm}只有{got}/{need},合不出来"
 
     mod_post("/walk_place", {"dest_x": wx(3),
                              "targets": [{"x": wx(lx), "y": floor_row, "item": str(H_TABLE)} for lx in (14, 9, 4)]})
-    _hwait("/walk_place_status", 60)
+    print(f"[house] tables → {_hwait('/walk_place_status', 60)}")
     mod_post("/walk_place", {"dest_x": wx(19),
                              "targets": [{"x": wx(lx), "y": floor_row, "item": str(H_CHAIR)} for lx in (2, 7, 12, 17)]})
-    _hwait("/walk_place_status", 60)
+    print(f"[house] chairs → {_hwait('/walk_place_status', 60)}")
 
     for k in range(4):
         col1 = 1 + 5 * k
@@ -1208,7 +1220,7 @@ def _build_house():
         mod_post("/settle", {"col": stand_col}); _hwait("/settle_status", 30)
         mod_post("/hop_up", {"row": floor_row, "col": stand_col}); _hwait("/hop_up_status", 30)
         mod_post("/place_walls", {"item": str(H_WALL), "cells": cells})
-        _hwait("/place_walls_status", 120)
+        print(f"[house] room{k} walls → {_hwait('/place_walls_status', 120)}")
         mod_post("/place_at", {"item": str(H_TORCH), "world": [wx(col1 + 2), roof_row + 2]})
         _hwait("/place_at_status", 30)
     return None
