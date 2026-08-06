@@ -1071,6 +1071,148 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
     return _have(need_name) >= need_n
 
 
+# ── 盖房子 ─────────────────────────────────────────────────────────────────────
+# 编排照搬 foundation.py(建造原语已经在 mod 里:rope_ladder/place_at/hop_up/bridge/
+# pillar/settle/drop/walk_place/place_walls)。房子 21 宽 × 10 高,下面 20 格绳梯。
+H_ROPE, H_FLOOR, H_WOOD = 965, 94, 9           # 绳 / 木平台 / 木材
+H_WORKBENCH, H_TABLE, H_CHAIR, H_WALL, H_TORCH = 36, 32, 34, 93, 8
+H_LEN, H_PILLAR, H_SUP, H_ROOF = 20, 9, 8, 20
+H_WALL_ORDER = [
+    (1, 2), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2),
+    (6, 3), (6, 4), (6, 5),
+    (5, 5), (4, 5), (3, 5), (2, 5), (1, 5),
+    (1, 4), (1, 3),
+    (2, 3), (3, 4), (4, 3), (5, 4),
+]
+
+
+def _hwait(path, timeout=90):
+    end = time.time() + timeout
+    while time.time() < end:
+        st = mod_get(path)
+        if not st.get("running"):
+            return st
+        time.sleep(0.05)
+    return mod_get(path)
+
+
+def _hprobe(x, y):
+    return mod_post("/probe_cell", {"x": x, "y": y})
+
+
+def _build_house():
+    """foundation.py 的编排。失败返回错误字符串,成功返回 None。"""
+    r = mod_post("/rope_ladder", {"item": str(H_ROPE), "n": H_LEN})
+    if not r.get("accepted"):
+        return f"绳梯被拒:{r}"
+    st = _hwait("/rope_ladder_status", 90)
+    if st.get("placed", 0) + st.get("already_there", 0) < H_LEN:
+        return f"绳梯没搭够:{st.get('placed')}"
+    above = st.get("above_top")
+    if not above:
+        return "绳梯没报 above_top"
+    ax, ay = above
+
+    mod_post("/place_at", {"item": str(H_FLOOR), "world": [ax, ay]})
+    _hwait("/place_at_status", 30)
+    if not _hprobe(ax, ay).get("has_tile"):
+        return f"({ax},{ay}) 没放上平台"
+
+    mod_post("/hop_up", {"row": ay})
+    _hwait("/hop_up_status", 20)
+    o = mod_post("/origin", {})
+    if o.get("cy") != ay - 1:
+        return f"没站上平台:cy={o.get('cy')} 应为 {ay-1}"
+
+    mod_post("/bridge", {"item": str(H_WOOD), "dir": "right", "n": H_LEN})
+    _hwait("/bridge_status", 120)
+    row = ay
+    missing = [ax + k for k in range(1, H_LEN + 1) if not _hprobe(ax + k, row).get("has_tile")]
+    if missing:
+        return f"地基缺 {len(missing)} 格"
+
+    end_x = ax + H_LEN
+    mod_post("/pillar", {"item": str(H_FLOOR), "n": H_PILLAR, "col": end_x})
+    st = _hwait("/pillar_status", 90)
+    if st.get("placed", 0) < H_PILLAR:
+        return f"柱子没搭够:{st.get('placed')}"
+
+    mod_post("/settle", {"col": end_x}); _hwait("/settle_status", 20)
+    pillar_top = row - (H_PILLAR - 1)
+    mod_post("/hop_up", {"row": pillar_top, "col": end_x}); _hwait("/hop_up_status", 20)
+    mod_post("/settle", {"col": end_x}); _hwait("/settle_status", 20)
+    o = mod_post("/origin", {})
+    if o.get("cx") != end_x or o.get("cy", 99999) > pillar_top - 1:
+        return f"没上到柱顶:({o.get('cx')},{o.get('cy')})"
+
+    roof_row = o["cy"] + 1
+    mod_post("/bridge", {"item": str(H_FLOOR), "dir": "left", "n": H_ROOF})
+    _hwait("/bridge_status", 120)
+    miss_r = [end_x - k for k in range(1, H_ROOF + 1) if not _hprobe(end_x - k, roof_row).get("has_tile")]
+    if miss_r:
+        return f"屋顶缺 {len(miss_r)} 格"
+
+    mod_post("/drop", {}); _hwait("/drop_status", 20)
+    base_x1 = end_x - 20
+
+    def wx(local):
+        return base_x1 + (local - 1)
+
+    for anchor_lx, pillar_lxs in ((3, [1, 6]), (8, [11]), (13, [16])):
+        mod_post("/settle", {"col": wx(anchor_lx)}); _hwait("/settle_status", 30)
+        for plx in pillar_lxs:
+            mod_post("/pillar", {"item": str(H_FLOOR), "n": H_SUP, "col": wx(plx)})
+            _hwait("/pillar_status", 90)
+
+    mod_post("/settle", {"col": wx(19)}); _hwait("/settle_status", 30)
+    o = mod_post("/origin", {})
+    floor_row = o["cy"]
+
+    def _held():
+        out = {}
+        for it in mod_get("/state").get("equipment", {}).get("items", []):
+            i = it.get("id")
+            if i:
+                out[i] = out.get(i, 0) + it.get("stack", 0)
+        return out
+
+    have = _held()
+    if have.get(H_WORKBENCH, 0) < 1:
+        mod_post("/craft", {"item_id": H_WORKBENCH, "amount": 1})
+        have = _held()
+    mod_post("/settle", {"col": wx(19)}); _hwait("/settle_status", 30)
+    mod_post("/place_at", {"item": str(H_WORKBENCH), "world": [wx(19), floor_row]})
+    _hwait("/place_at_status", 20)
+
+    for _ in range(40):     # 工作台放下后配方要几帧才出现
+        if any(rc.get("item_id") == H_TABLE for rc in mod_get("/state").get("available_recipes", [])):
+            break
+        time.sleep(0.1)
+    for item, need in ((H_TABLE, 3), (H_CHAIR, 4), (H_WALL, 96)):
+        short = need - have.get(item, 0)
+        if short > 0:
+            mod_post("/craft", {"item_id": item, "amount": short})
+
+    mod_post("/walk_place", {"dest_x": wx(3),
+                             "targets": [{"x": wx(lx), "y": floor_row, "item": str(H_TABLE)} for lx in (14, 9, 4)]})
+    _hwait("/walk_place_status", 60)
+    mod_post("/walk_place", {"dest_x": wx(19),
+                             "targets": [{"x": wx(lx), "y": floor_row, "item": str(H_CHAIR)} for lx in (2, 7, 12, 17)]})
+    _hwait("/walk_place_status", 60)
+
+    for k in range(4):
+        col1 = 1 + 5 * k
+        cells = [[wx(col1 + (c - 1)), roof_row + rr] for (rr, c) in H_WALL_ORDER]
+        stand_col = wx({0: 4, 1: 9, 2: 14, 3: 19}[k])
+        mod_post("/settle", {"col": stand_col}); _hwait("/settle_status", 30)
+        mod_post("/hop_up", {"row": floor_row, "col": stand_col}); _hwait("/hop_up_status", 30)
+        mod_post("/place_walls", {"item": str(H_WALL), "cells": cells})
+        _hwait("/place_walls_status", 120)
+        mod_post("/place_at", {"item": str(H_TORCH), "world": [wx(col1 + 2), roof_row + 2]})
+        _hwait("/place_at_status", 30)
+    return None
+
+
 def _run_from_zero():
     """/tb 1 — 一条写死的流程:备料 → 地表盖房 → 下地狱。全程不问 LLM。"""
     say("开工:先砍木头备料,再盖房子,然后下地狱。", bot=True)
@@ -1093,42 +1235,26 @@ def _run_from_zero():
     say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
 
     # ── 2. 地表盖房 ──────────────────────────────────────────────────────────
-    # 绳子不在这儿找:箱子沿下地狱的主道顺路开(descent_route 已经按 dig 额度筛过),
-    # 罐子靠赶路时 SmashPot 顺手砸。专门跑去挖一个地下箱子要挖几十格,不值。
-    # 房子占的格子不能和现有方块重合。start 会返回 conflicts,冲突多就沿地表挪一段再试
-    pos = _slim(mod_get("/state"))["pos"]
-    best = None
-    for dx in (0, 14, -14, 28, -28, 42, -42):
-        probe = mod_post("/build_replay_start", {"ax": pos["x"] + dx, "ay": pos["y"]})
-        if not probe.get("ok"):
-            say(f"盖不了({probe.get('reason')}),先不下地狱了。", bot=True)
+    # 绳子不在这儿找:箱子沿下地狱的主道顺路开,罐子靠赶路时 SmashPot 顺手砸。
+    # 房子 21 宽 × 10 高(下面还有 20 格绳梯),先问 scan_flat 要一块放得下的地方。
+    sf = mod_post("/scan_flat", {"w": 21, "h": 10, "range": 200})
+    if sf.get("found"):
+        hx, hy = sf["at"]
+        say(f"房址 ({hx},{hy}),走过去。", bot=True)
+        nav = json.loads(run_tool("nav_to", {"x": hx, "y": hy}))
+        if nav.get("status") == "interrupted":
             return True
-        c = probe.get("conflicts", 0)
-        print(f"[run1] 房址 x{pos['x']+dx:+d} → 冲突{c}格")
-        if best is None or c < best[1]:
-            best = (dx, c)
-        mod_post("/build_replay_stop", {})
-        if c == 0:
-            break
-    if best[1] > 0:
-        say(f"找不到完全空的地方,挑了冲突最少的({best[1]}格)。", bot=True)
-    r = mod_post("/build_replay_start", {"ax": pos["x"] + best[0], "ay": pos["y"]})
-    if not r.get("ok"):
-        say(f"盖不了({r.get('reason')}),先不下地狱了。", bot=True)
-        return True
-    say(f"开始盖({r.get('events','?')}个事件)。", bot=True)
-    while True:
-        time.sleep(0.5)
-        if next_instruction(block=False):
-            mod_post("/build_replay_stop", {})
-            return True
-        st = mod_get("/build_replay_status")
-        if not st.get("running"):
-            say(f"盖完了:放置{st.get('placed',0)},挖掘{st.get('mined',0)},"
-                f"跳过{st.get('skipped',0)}{(',' + st['fail_reason']) if st.get('fail_reason') else ''}。", bot=True)
-            break
+    else:
+        say(f"附近没有 21×10 的空地(扫了{sf.get('scanned')}格),就地盖。", bot=True)
 
-    # ── 4. 下地狱 ────────────────────────────────────────────────────────────
+    say("开始盖房子。", bot=True)
+    err = _build_house()
+    if err:
+        say(f"房子没盖成:{err}", bot=True)
+        return True
+    say("房子盖好了。", bot=True)
+
+    # ── 3. 下地狱 ────────────────────────────────────────────────────────────
     say("下地狱。", bot=True)
     return _run_descend("jungle")
 
