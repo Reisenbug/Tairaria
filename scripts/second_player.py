@@ -499,6 +499,25 @@ def with_result(base, prev_inv):
     return json.dumps(base, ensure_ascii=False)
 
 
+# 顺路采集的额度。find_tiles 的 max_dist 是直线距离,隔着山的话直线 25 格可能要绕几百格,
+# 所以真正的判据是 path_cost 问出来的实际挖/走格数。只有罐子设限,箱子水晶照旧。
+GREED_LIMIT = {"Pots": (3, 10)}      # 最多挖3格、走10格
+
+
+def _worth_detour(cat, tx, ty):
+    lim = GREED_LIMIT.get(cat)
+    if not lim:
+        return True
+    r = mod_post("/path_cost", {"x": tx, "y": ty})
+    if not r.get("ok"):
+        return False
+    dig, walk = r.get("dig", 999), r.get("walk", 999)
+    ok = dig <= lim[0] and walk <= lim[1]
+    if not ok:
+        print(f"[greed] 跳过 {cat}({tx},{ty}):要挖{dig}走{walk},上限{lim[0]}/{lim[1]}")
+    return ok
+
+
 def _greed_collect(cat, t):
     """One side-trip for whitelisted loot while traveling: chest → open+loot, anything else → pick it out.
     Fails FAST — can't reach or can't dent means give up and move on; the journey matters more than any
@@ -623,8 +642,12 @@ def run_tool(name, args):
                     for cat in greed:
                         rr = mod_post("/find_tiles", {"name": cat, "n": 5, "max_dist": 25})
                         for t in (rr.get("tiles") or []):
-                            if (t["x"], t["y"]) not in visited:
-                                hit = (cat, t); break
+                            if (t["x"], t["y"]) in visited:
+                                continue
+                            if not _worth_detour(cat, t["x"], t["y"]):
+                                visited.add((t["x"], t["y"]))   # 太远,别每3秒重问一次
+                                continue
+                            hit = (cat, t); break
                         if hit:
                             break
                     if hit:
