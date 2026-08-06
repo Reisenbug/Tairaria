@@ -983,7 +983,7 @@ def _run_descend(bname):
 
 RUN1_BUILD_WOOD = 125      # 建房
 RUN1_ROAD_WOOD = 75        # 赶路的平台,1木材出2个
-RUN1_PLATFORMS = 150       # 平台搓够这个数就停
+PLAT_LOW, PLAT_HIGH = 50, 150      # 平台少于50就补到150
 RUN1_NEED = {"木材": RUN1_BUILD_WOOD + RUN1_ROAD_WOOD, "绳": 20, "火把": 4}
 
 
@@ -991,18 +991,42 @@ def _have(name):
     return _inv_snapshot().get(name, 0)
 
 
-def _wait_pickup(max_s=8):
-    """站着等地上的掉落物被吸完。砍完那一瞬掉落物还没生成,所以空了也先等半秒再确认。"""
+# 原版拾取范围 defaultItemGrabRange=42px ≈ 2.6格(从碰撞箱外扩)。掉在 3 格外就永远吸不到,
+# 干等只会站着不动 —— 所以要走过去捡。
+GRAB_CELLS = 2
+
+
+def _wait_pickup(max_s=12):
+    """等掉落物进包;够不到的主动走过去捡。"""
     t0 = time.monotonic()
     empty_since = None
     while time.monotonic() - t0 < max_s:
-        if mod_get("/state").get("dropped_items"):
-            empty_since = None
-        elif empty_since is None:
-            empty_since = time.monotonic()
-        elif time.monotonic() - empty_since >= 0.6:
-            return True
-        time.sleep(0.3)
+        st = mod_get("/state")
+        drops = st.get("dropped_items") or []
+        if not drops:
+            if empty_since is None:
+                empty_since = time.monotonic()      # 砍完那一瞬掉落物还没生成,先等半秒再确认
+            elif time.monotonic() - empty_since >= 0.6:
+                return True
+            time.sleep(0.3)
+            continue
+        empty_since = None
+        me = _slim(st)["pos"]
+        far = []
+        for it in drops:
+            ip = it.get("pos") or {}
+            ix, iy = round(ip.get("x", 0) / 16), round(ip.get("y", 0) / 16)
+            if abs(ix - me["x"]) + abs(iy - me["y"]) > GRAB_CELLS:
+                far.append((abs(ix - me["x"]) + abs(iy - me["y"]), ix, iy))
+        if not far:
+            time.sleep(0.3)                          # 都在吸取范围里,等它飞进来
+            continue
+        far.sort()
+        _, tx, ty = far[0]
+        print(f"[pickup] 走去捡 ({tx},{ty}),还剩{len(drops)}件")
+        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))
+        if nav.get("status") == "interrupted":
+            return False
     return False
 
 
@@ -1069,6 +1093,8 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
         got = _have(need_name)
         print(f"[run1] {act} ({tx},{ty}) → {need_name}={got}/{need_n}")
         acted += 1
+        if got >= need_n:      # 够了就立刻撒手,别再走去下一棵
+            return True
     return _have(need_name) >= need_n
 
 
@@ -1226,9 +1252,29 @@ def _build_house():
     return None
 
 
+def _top_up_platforms():
+    """平台少于 PLAT_LOW 就补到 PLAT_HIGH。amount 是合成次数,1次吃1木材出2平台。
+    赶路一路铺平台,开局搓一次是不够的 —— 每次要用之前调一下。"""
+    have = _have("木平台")
+    if have >= PLAT_LOW:
+        return have
+    times = (PLAT_HIGH - have + 1) // 2
+    wood = _have("木材")
+    times = min(times, max(0, wood - RUN1_BUILD_WOOD))
+    if times <= 0:
+        print(f"[run1] 平台{have},想补但木材只有{wood}")
+        return have
+    r = mod_post("/craft", {"item_name": "WoodPlatform", "amount": times})
+    now = _have("木平台")
+    print(f"[run1] 平台{have}<{PLAT_LOW},合{times}次 → {now}  {r}")
+    if r.get("free_slots") == 0:
+        say("背包满了,合不了平台。", bot=True)
+    return now
+
+
 def _run_from_zero():
-    """/tb 1 — 一条写死的流程:备料 → 地表盖房 → 下地狱。全程不问 LLM。"""
-    say("开工:先砍木头备料,再盖房子,然后下地狱。", bot=True)
+    """/tb 1 — 写死的流程:木材 → 绳子 → 盖房 → 下地狱。全程不问 LLM。"""
+    say("开工:砍木头 → 找绳子 → 盖房子 → 下地狱。", bot=True)
 
     # ── 1. 木材 ──────────────────────────────────────────────────────────────
     if _have("木材") < RUN1_NEED["木材"]:
@@ -1238,21 +1284,31 @@ def _run_from_zero():
             return True
         if not ok:
             say(f"附近树砍完了,木材只有{_have('木材')}。", bot=True)
-    # 只搓到够用为止:amount 是合成次数,1次吃1木材出2平台。
-    # 按富余木材全搓的话,手里有 9999 木材就会去合 9874 次。
-    need_times = max(0, (RUN1_PLATFORMS - _have("木平台")) + 1) // 2
-    times = min(need_times, max(0, _have("木材") - RUN1_BUILD_WOOD))
-    if times > 0:
-        r = mod_post("/craft", {"item_name": "WoodPlatform", "amount": times})
-        print(f"[run1] craft platform ×{times}次 → {r}")
-        if r.get("free_slots") == 0:
-            say("背包满了,合不了平台 —— 先清一下包。", bot=True)
-            return True
+    _top_up_platforms()
     say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
 
-    # ── 2. 地表盖房 ──────────────────────────────────────────────────────────
-    # 绳子不在这儿找:箱子沿下地狱的主道顺路开,罐子靠赶路时 SmashPot 顺手砸。
-    #
+    # ── 2. 绳子 ──────────────────────────────────────────────────────────────
+    # 房子要 20 格绳梯,所以绳子必须在盖房之前拿到。绳子合不出来,只能开箱和砸罐子;
+    # 罐子在洞里,赶路时 SmashPot 够得到就砸。往丛林入口走的这一路正好穿过洞穴带。
+    if _have("绳") < RUN1_NEED["绳"]:
+        say(f"绳子{_have('绳')}/{RUN1_NEED['绳']},往丛林方向找箱子和罐子。", bot=True)
+        fd = mod_post("/find_descent", {"name": "jungle"})
+        if fd.get("found"):
+            say(f"丛林入口 ({fd['x']},{fd['y']}),边走边搜刮。", bot=True)
+            nav = json.loads(run_tool("nav_to", {"x": fd["x"], "y": fd["y"],
+                                                 "greed": ["Containers", "Pots"]}))
+            if nav.get("status") == "interrupted":
+                return True
+        # 到了还不够就在附近开箱子补
+        if _have("绳") < RUN1_NEED["绳"]:
+            if _gather_by("Containers", "open", "绳", RUN1_NEED["绳"]) is None:
+                return True
+    say(f"绳子{_have('绳')}、火把{_have('火把')}。", bot=True)
+    if _have("绳") < H_LEN:
+        say(f"绳子只有{_have('绳')},搭不了{H_LEN}格绳梯,盖不了房。", bot=True)
+        return True
+
+    # ── 3. 地表盖房 ──────────────────────────────────────────────────────────
     # 房子是 L 形:一根 20 格的绳梯(只占 1 列),顶上才是 21×10 的房身。
     # 拿 21×30 的矩形去找会把大量能盖的地方判掉,所以 scan_house 按真实形状找。
     sf = mod_post("/scan_house", {"w": 21, "h": 10, "rope_h": H_LEN, "range": 200})
@@ -1272,13 +1328,15 @@ def _run_from_zero():
         return True
 
     say("开始盖房子。", bot=True)
+    _top_up_platforms()
     err = _build_house()
     if err:
         say(f"房子没盖成:{err}", bot=True)
         return True
     say("房子盖好了。", bot=True)
 
-    # ── 3. 下地狱 ────────────────────────────────────────────────────────────
+    # ── 4. 下地狱 ────────────────────────────────────────────────────────────
+    _top_up_platforms()
     say("下地狱。", bot=True)
     return _run_descend("jungle")
 
