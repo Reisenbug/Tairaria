@@ -983,6 +983,7 @@ def _run_descend(bname):
 
 RUN1_BUILD_WOOD = 125      # 建房
 RUN1_ROAD_WOOD = 75        # 赶路的平台,1木材出2个
+RUN1_PLATFORMS = 150       # 平台搓够这个数就停
 RUN1_NEED = {"木材": RUN1_BUILD_WOOD + RUN1_ROAD_WOOD, "绳": 20, "火把": 4}
 
 
@@ -1225,10 +1226,13 @@ def _run_from_zero():
             return True
         if not ok:
             say(f"附近树砍完了,木材只有{_have('木材')}。", bot=True)
-    spare = max(0, _have("木材") - RUN1_BUILD_WOOD)
-    if spare > 0:
-        r = mod_post("/craft", {"item_name": "WoodPlatform", "amount": spare})
-        print(f"[run1] craft platform ×{spare} → {r}")
+    # 只搓到够用为止:amount 是合成次数,1次吃1木材出2平台。
+    # 按富余木材全搓的话,手里有 9999 木材就会去合 9874 次。
+    need_times = max(0, (RUN1_PLATFORMS - _have("木平台")) + 1) // 2
+    times = min(need_times, max(0, _have("木材") - RUN1_BUILD_WOOD))
+    if times > 0:
+        r = mod_post("/craft", {"item_name": "WoodPlatform", "amount": times})
+        print(f"[run1] craft platform ×{times}次 → {r}")
         if r.get("free_slots") == 0:
             say("背包满了,合不了平台 —— 先清一下包。", bot=True)
             return True
