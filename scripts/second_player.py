@@ -1236,16 +1236,24 @@ def _run_from_zero():
 
     # ── 2. 地表盖房 ──────────────────────────────────────────────────────────
     # 绳子不在这儿找:箱子沿下地狱的主道顺路开,罐子靠赶路时 SmashPot 顺手砸。
-    # 房子 21 宽 × 10 高(下面还有 20 格绳梯),先问 scan_flat 要一块放得下的地方。
-    sf = mod_post("/scan_flat", {"w": 21, "h": 10, "range": 200})
-    if sf.get("found"):
-        hx, hy = sf["at"]
-        say(f"房址 ({hx},{hy}),走过去。", bot=True)
-        nav = json.loads(run_tool("nav_to", {"x": hx, "y": hy}))
-        if nav.get("status") == "interrupted":
-            return True
-    else:
-        say(f"附近没有 21×10 的空地(扫了{sf.get('scanned')}格),就地盖。", bot=True)
+    #
+    # 房子是 L 形:一根 20 格的绳梯(只占 1 列),顶上才是 21×10 的房身。
+    # 拿 21×30 的矩形去找会把大量能盖的地方判掉,所以 scan_house 按真实形状找。
+    sf = mod_post("/scan_house", {"w": 21, "h": 10, "rope_h": H_LEN, "range": 200})
+    if not sf.get("found"):
+        say(f"附近没地方盖(要一根{H_LEN}格净空的柱子,顶上还得放得下21×10;扫了{sf.get('scanned')}格)。", bot=True)
+        return True
+    hx, hy = sf["at"]
+    say(f"房址 ({hx},{hy}),走过去。", bot=True)
+    nav = json.loads(run_tool("nav_to", {"x": hx, "y": hy}))
+    if nav.get("status") == "interrupted":
+        return True
+    # 真的到了才动手 —— 上次人在 48 格外就开盖,绳梯第一格就 occupied
+    at = _slim(mod_get("/state"))["pos"]
+    d = abs(at["x"] - hx) + abs(at["y"] - hy)
+    if d > 4:
+        say(f"没走到房址(还差{d}格,停在 {at['x']},{at['y']}),不盖了。", bot=True)
+        return True
 
     say("开始盖房子。", bot=True)
     err = _build_house()
