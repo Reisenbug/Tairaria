@@ -1297,6 +1297,33 @@ def _top_up_platforms(reserve=0):
     return now
 
 
+def _collect_until_rope(need):
+    """沿 descent_route 的宝藏链走,绳子够了就停(不走完全程)。
+    None=被打断 / True=够了 / False=走完了还不够。"""
+    r = mod_post("/descent_route", {"name": "jungle"})
+    if not r.get("found"):
+        say("没找到下地狱的主道。", bot=True)
+        return False
+    plan = r.get("itinerary") or []
+    kinds = {}
+    for t in plan:
+        kinds[t["kind"]] = kinds.get(t["kind"], 0) + 1
+    print("[rope] 路上: " + (", ".join(f"{_KN.get(k,k)}×{v}" for k, v in sorted(kinds.items())) or "啥也没有"))
+    for i, t in enumerate(plan):
+        if _have("绳") >= need:
+            say(f"绳子够了({_have('绳')}),收手。", bot=True)
+            return True
+        if t["kind"] == "heart":
+            continue                      # 现在只为绳子跑这一趟
+        print(f"[rope] [{i+1}/{len(plan)}] {t['kind']} ({t['x']},{t['y']})")
+        outcome, intr = _greed_collect("Containers", t)
+        if outcome == "interrupted":
+            say("(被打断,停下待命)", bot=True)
+            return None
+        print(f"[rope]   {outcome} → 绳{_have('绳')}/{need}")
+    return _have("绳") >= need
+
+
 def _run_from_zero():
     """/tb 1 — 写死的流程:木材 → 绳子 → 盖房 → 下地狱。全程不问 LLM。"""
     say("开工:砍木头 → 找绳子 → 盖房子 → 下地狱。", bot=True)
@@ -1313,21 +1340,14 @@ def _run_from_zero():
     say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
 
     # ── 2. 绳子 ──────────────────────────────────────────────────────────────
-    # 房子要 20 格绳梯,所以绳子必须在盖房之前拿到。绳子合不出来,只能开箱和砸罐子;
-    # 罐子在洞里,赶路时 SmashPot 够得到就砸。往丛林入口走的这一路正好穿过洞穴带。
+    # 房子要 20 格绳梯,绳子必须在盖房之前拿到。绳子合不出来,只能开箱砸罐。
+    # 走 descent_route 而不是自己 nav+greed:那条线本来就从玩家脚下起,已经含了
+    # "走到丛林入口"这一段,路上的箱子也按 tier 筛过。这里只是提前收手 —— 绳子够了
+    # 就不再往下走,回头盖房。
     if _have("绳") < RUN1_NEED["绳"]:
-        say(f"绳子{_have('绳')}/{RUN1_NEED['绳']},往丛林方向找箱子和罐子。", bot=True)
-        fd = mod_post("/find_descent", {"name": "jungle"})
-        if fd.get("found"):
-            say(f"丛林入口 ({fd['x']},{fd['y']}),边走边搜刮。", bot=True)
-            nav = json.loads(run_tool("nav_to", {"x": fd["x"], "y": fd["y"],
-                                                 "greed": ["Containers", "Pots"]}))
-            if nav.get("status") == "interrupted":
-                return True
-        # 到了还不够就在附近开箱子补
-        if _have("绳") < RUN1_NEED["绳"]:
-            if _gather_by("Containers", "open", "绳", RUN1_NEED["绳"]) is None:
-                return True
+        say(f"绳子{_have('绳')}/{RUN1_NEED['绳']},沿主道边走边开箱。", bot=True)
+        if _collect_until_rope(RUN1_NEED["绳"]) is None:
+            return True
     say(f"绳子{_have('绳')}、火把{_have('火把')}。", bot=True)
     if _have("绳") < H_LEN:
         say(f"绳子只有{_have('绳')},搭不了{H_LEN}格绳梯,盖不了房。", bot=True)
