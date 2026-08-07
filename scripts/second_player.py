@@ -602,23 +602,10 @@ def run_tool(name, args):
             deadline = time.monotonic() + NAV_TIMEOUT_S
             last_report = time.monotonic()
             last_greed = time.monotonic()
-            hurt_times = []
             resume = False
             while time.monotonic() < deadline:
                 time.sleep(0.5)
-                # HARASSED: the reflex layer swings at whatever is in arm's reach, but a foe that lands 3 hits
-                # inside 10s is blocking real progress — stop, clear it properly, then resume the journey.
-                for ev in drain_events():
-                    if ev.get("type") == "hurt":
-                        hurt_times.append(time.monotonic())
-                hurt_times = [h for h in hurt_times if time.monotonic() - h < 10]
-                if len(hurt_times) >= 3:
-                    mod_post("/nav_recede_stop", {})
-                    say("被缠上了,清一下怪再走。", bot=True)
-                    run_tool("fight", {"max_dist": 25, "seconds": 8})
-                    hurt_times = []
-                    resume = True
-                    break
+                drain_events()   # 队列无界,没人消费会一直涨
                 # INTERRUPTIBLE: a new /tb while walking means the player wants to intervene.
                 # Stop nav, hand the interruption + where-we-stopped back to the LLM to re-decide.
                 interrupt = next_instruction(block=False)
