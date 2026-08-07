@@ -1372,6 +1372,16 @@ def _run_from_zero():
         say(f"没走到房址(还差{d}格,停在 {at['x']},{at['y']}),不盖了。", bot=True)
         return True
 
+    # nav_to 的容差是 24px(1.5格),停在隔壁列也算"到了"。绳梯从人脚下那列开始放,
+    # 差一格就可能放进树干(4795 是空的,4796 整列是树 → occupied,一根也放不下)。
+    # settle 按半格判定,对齐后 origin 必然就是这一列。
+    mod_post("/settle", {"col": hx})
+    st = _hwait("/settle_status", 20)
+    ocx = (st.get("origin") or [None])[0]
+    if ocx != hx:
+        say(f"站不到房址那一列(要{hx},在{ocx};{st.get('outcome')})。", bot=True)
+        return True
+
     say("开始盖房子。", bot=True)
     _top_up_platforms(RUN1_BUILD_WOOD)
     err = _build_house()
