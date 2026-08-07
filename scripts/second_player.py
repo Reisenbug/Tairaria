@@ -1110,8 +1110,8 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
 
 
 # ── 盖房子 ─────────────────────────────────────────────────────────────────────
-# 编排照搬 foundation.py(建造原语已经在 mod 里:rope_ladder/place_at/hop_up/bridge/
-# pillar/settle/drop/walk_place/place_walls)。房子 21 宽 × 10 高,下面 20 格绳梯。
+# 编排照搬 foundation.py(建造原语已经在 mod 里:place_at/hop_up/bridge/
+# pillar/settle/drop/walk_place/place_walls)。房子就是一个 21 宽 × 10 高的矩形。
 H_ROPE, H_FLOOR, H_WOOD = 965, 94, 9           # 绳 / 木平台 / 木材
 H_WORKBENCH, H_TABLE, H_CHAIR, H_WALL, H_TORCH = 36, 32, 34, 93, 8
 H_LEN, H_PILLAR, H_SUP, H_ROOF = 20, 9, 8, 20
@@ -1138,25 +1138,45 @@ def _hprobe(x, y):
     return mod_post("/probe_cell", {"x": x, "y": y})
 
 
-def _build_house():
-    """foundation.py 的编排。失败返回错误字符串,成功返回 None。"""
-    r = mod_post("/rope_ladder", {"item": str(H_ROPE), "n": H_LEN})
-    if not r.get("accepted"):
-        return f"绳梯被拒:{r}"
-    st = _hwait("/rope_ladder_status", 90)
-    print(f"[house] rope → {st}")
-    if st.get("placed", 0) + st.get("already_there", 0) < H_LEN:
-        return f"绳梯没搭够:{st.get('placed')}"
-    above = st.get("above_top")
-    if not above:
-        return "绳梯没报 above_top"
-    ax, ay = above
+def _build_house(ax, ay):
+    """在 (ax,ay)=房子矩形的左下角 开工。失败返回错误字符串,成功返回 None。"""
+    # 以前第一步是 20 格绳梯,绳子只能靠开箱/砸罐碰运气,经常凑不齐就卡死在这。
+    # 现在选址只要求 21×10 全空,人自己垫平台上去 —— 平台随时能用木材合。
+    #
+    # 先对齐到左下角那一列:nav 的容差是 24px(1.5格),停在隔壁列也算"到了",
+    # 而后面每一步都拿 ax 当锚点,差一格整座房子就偏了。
+    mod_post("/settle", {"col": ax})
+    _hwait("/settle_status", 20)
+    o = mod_post("/origin", {})
+    if o.get("cx") != ax:
+        return f"站不到房子左下角那一列(要{ax},在{o.get('cx')})"
 
+    # 人可能站在洞底或半坡上,垫到"地板下面那一行":地板放在 ay,人得站在 ay+1 才够得着往上放。
+    # 一次垫一格再读 origin,垫不动就是真上不去了 —— 不猜要垫几格。
+    for _ in range(40):
+        cy = mod_post("/origin", {}).get("cy")
+        if cy is None:
+            return "读不到 origin"
+        if cy <= ay + 1:
+            break
+        # col 不传:pillar 会先把身体从这一列让开再砌(传了 col 它认为调用方已安置好人)
+        mod_post("/pillar", {"item": str(H_FLOOR), "n": 1})
+        st = _hwait("/pillar_status", 30)
+        if st.get("placed", 0) < 1:
+            return f"垫不上去(还在 cy={cy},要到 {ay + 1}):{st.get('reason') or st.get('outcome')}"
+        mod_post("/hop_up", {"row": cy - 1})
+        _hwait("/hop_up_status", 20)
+        mod_post("/settle", {"col": ax})
+        _hwait("/settle_status", 20)
+    else:
+        return f"垫了40次还没到 {ay + 1}"
+    print(f"[house] 就位 ({ax},{mod_post('/origin', {}).get('cy')}) 目标左下角 ({ax},{ay})")
+
+    # 地板第一格:bridge 是"站在已铺好的地板上往外接",所以起点这格得先有。
     mod_post("/place_at", {"item": str(H_FLOOR), "world": [ax, ay]})
     _hwait("/place_at_status", 30)
     if not _hprobe(ax, ay).get("has_tile"):
         return f"({ax},{ay}) 没放上平台"
-
     mod_post("/hop_up", {"row": ay})
     _hwait("/hop_up_status", 20)
     o = mod_post("/origin", {})
@@ -1330,29 +1350,16 @@ def _run_from_zero():
     _top_up_platforms(RUN1_BUILD_WOOD)
     say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
 
-    # ── 2. 绳子 ──────────────────────────────────────────────────────────────
-    # 房子要 20 格绳梯,绳子必须在盖房之前拿到。绳子合不出来,只能开箱砸罐。
-    # 走 descent_route 而不是自己 nav+greed:那条线本来就从玩家脚下起,已经含了
-    # "走到丛林入口"这一段,路上的箱子也按 tier 筛过。这里只是提前收手 —— 绳子够了
-    # 就不再往下走,回头盖房。
-    if _have("绳") < RUN1_NEED["绳"]:
-        say(f"绳子{_have('绳')}/{RUN1_NEED['绳']},沿主道边走边开箱。", bot=True)
-        if _collect_until_rope(RUN1_NEED["绳"]) is None:
-            return True
-    say(f"绳子{_have('绳')}、火把{_have('火把')}。", bot=True)
-    if _have("绳") < H_LEN:
-        say(f"绳子只有{_have('绳')},搭不了{H_LEN}格绳梯,盖不了房。", bot=True)
-        return True
-
+    # 盖房不再需要绳子(垫脚改成平台),所以这里不为绳子专门跑一趟 —— 绳子只能靠开箱砸罐,
+    # 凑不齐就卡死在盖房前。下地狱路上顺手收到的绳子照样留着用。
     # ── 3. 地表盖房 ──────────────────────────────────────────────────────────
-    # 房子是 L 形:一根 20 格的绳梯(只占 1 列),顶上才是 21×10 的房身。
-    # 拿 21×30 的矩形去找会把大量能盖的地方判掉,所以 scan_house 按真实形状找。
-    sf = mod_post("/scan_house", {"w": 21, "h": 10, "rope_h": H_LEN, "range": 200})
+    # 房子就是一个 21×10 的矩形,at 是左下角。选址只问一件事:这个框里空不空。
+    sf = mod_post("/scan_house", {"w": 21, "h": 10, "range": 200})
     if not sf.get("found"):
-        say(f"附近没地方盖(要一根{H_LEN}格净空的柱子,顶上还得放得下21×10;扫了{sf.get('scanned')}格)。", bot=True)
+        say(f"附近没地方盖(要 21×10 的净空;扫了{sf.get('scanned')}格)。", bot=True)
         return True
     hx, hy = sf["at"]
-    say(f"房址 ({hx},{hy}),走过去。", bot=True)
+    say(f"房址 ({hx},{hy}) 左下角,走过去。", bot=True)
     nav = json.loads(run_tool("nav_to", {"x": hx, "y": hy}))
     if nav.get("status") == "interrupted":
         return True
@@ -1363,19 +1370,9 @@ def _run_from_zero():
         say(f"没走到房址(还差{d}格,停在 {at['x']},{at['y']}),不盖了。", bot=True)
         return True
 
-    # nav_to 的容差是 24px(1.5格),停在隔壁列也算"到了"。绳梯从人脚下那列开始放,
-    # 差一格就可能放进树干(4795 是空的,4796 整列是树 → occupied,一根也放不下)。
-    # settle 按半格判定,对齐后 origin 必然就是这一列。
-    mod_post("/settle", {"col": hx})
-    st = _hwait("/settle_status", 20)
-    ocx = (st.get("origin") or [None])[0]
-    if ocx != hx:
-        say(f"站不到房址那一列(要{hx},在{ocx};{st.get('outcome')})。", bot=True)
-        return True
-
     say("开始盖房子。", bot=True)
     _top_up_platforms(RUN1_BUILD_WOOD)
-    err = _build_house()
+    err = _build_house(hx, hy)
     if err:
         say(f"房子没盖成:{err}", bot=True)
         return True
