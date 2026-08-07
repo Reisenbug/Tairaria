@@ -1236,12 +1236,16 @@ def _build_house():
         return "工作台放下了但木桌配方没出现 —— 站得太远?"
     for item, need, nm in ((H_TABLE, 3, "木桌"), (H_CHAIR, 4, "木椅"), (H_WALL, 96, "木墙")):
         short = need - have.get(item, 0)
+        r = None
         if short > 0:
             r = mod_post("/craft", {"item_id": item, "amount": short})
             print(f"[house] craft {nm} ×{short} → {r}")
         got = _held().get(item, 0)
         if got < need:
-            return f"{nm}只有{got}/{need},合不出来"
+            why = {"inventory_full": "背包满了", "no_more_materials": "材料不够",
+                   "no_recipe": "没这个配方(工作台不对?)"}.get((r or {}).get("stop"), "")
+            tail = f"({why},空槽{r.get('free_slots')})" if r and why else ""
+            return f"{nm}只有{got}/{need}{tail}"
 
     mod_post("/walk_place", {"dest_x": wx(3),
                              "targets": [{"x": wx(lx), "y": floor_row, "item": str(H_TABLE)} for lx in (14, 9, 4)]})
