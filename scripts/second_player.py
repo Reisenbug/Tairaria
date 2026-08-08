@@ -1124,6 +1124,30 @@ def _hwait(path, timeout=90):
     return mod_get(path)
 
 
+def _goto_stand(ax, ay, timeout=180):
+    """把人送到脚踩着 (ax,ay) 的位置。失败返回错误字符串,成功返回 None。
+
+    stand 模式:目标不 snap 到地面(房址本来就可能悬空),到了近处交给 A* —— 它搜的是真实
+    物理状态空间,跳放平台/pillar/挖穿都是它自己的边,能不能站上去由搜索本身回答。
+    greedy 在这儿不行:H 场是格子 Dijkstra,悬空格的 H 只比正下方低"高差×MoveUp",
+    它不知道那几格竖直跳不上去,梯度把人吸到正下方那列然后原地打转。
+    """
+    r = mod_post("/nav_recede", {"gx": ax, "gy": ay, "stand": True})
+    if not r.get("ok"):
+        return f"nav 没接:{r.get('reason')}"
+    end = time.time() + timeout
+    while time.time() < end:
+        time.sleep(0.3)
+        drain_events()
+        d = mod_get("/nav_recede_done")
+        if d.get("done"):
+            return None
+        if d.get("status") == "failed":
+            return d.get("reason") or "failed"
+    mod_post("/nav_recede_stop", {})
+    return "timeout"
+
+
 def _build_house(ax, ay):
     """在 (ax,ay)=房子矩形左下角 盖 4 间房。编排整个在 mod 里(HouseBuilder)。
     失败返回错误字符串,成功返回 None。
@@ -1217,17 +1241,18 @@ def _run_from_zero():
     nav = json.loads(run_tool("nav_to", {"x": hx, "y": hy}))
     if nav.get("status") == "interrupted":
         return True
-    # 只看横向到没到。竖直方向差多少不算失败 —— 房址现在允许悬空(选址只要求 21×10 是空的),
-    # 人本来就要自己垫平台上去,_build_house 第一步干的就是这个。
-    # 以前用曼哈顿距离拦,房址在头顶 5 格就被判成"没走到"直接不盖了。
-    at = _slim(mod_get("/state"))["pos"]
-    dx = abs(at["x"] - hx)
-    if dx > 4:
-        say(f"没走到房址那一带(横向还差{dx}格,停在 {at['x']},{at['y']}),不盖了。", bot=True)
+    # 补平台要在"站上房址"之前:房址可能悬空,寻路靠放平台垫上去,没货就上不去。
+    _top_up_platforms(RUN1_BUILD_WOOD)
+
+    # 站稳左下角再开工。房址允许悬空(选址只要求 21×10 空),所以不能让 nav 把目标 snap 到
+    # 地面 —— stand 模式不 snap,近处切 A*(会跳放平台/砍树/挖穿),到达判据就是"脚踩着那格"。
+    # 以前这里只查横向差 4 格,竖直差多少不管,HouseBuilder 就拿着错的一行起算。
+    err = _goto_stand(hx, hy)
+    if err:
+        say(f"上不去房址 ({hx},{hy}):{err}", bot=True)
         return True
 
     say("开始盖房子。", bot=True)
-    _top_up_platforms(RUN1_BUILD_WOOD)
     err = _build_house(hx, hy)
     if err:
         say(f"房子没盖成:{err}", bot=True)
