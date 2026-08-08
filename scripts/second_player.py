@@ -1363,11 +1363,13 @@ def _run_from_zero():
     nav = json.loads(run_tool("nav_to", {"x": hx, "y": hy}))
     if nav.get("status") == "interrupted":
         return True
-    # 真的到了才动手 —— 上次人在 48 格外就开盖,绳梯第一格就 occupied
+    # 只看横向到没到。竖直方向差多少不算失败 —— 房址现在允许悬空(选址只要求 21×10 是空的),
+    # 人本来就要自己垫平台上去,_build_house 第一步干的就是这个。
+    # 以前用曼哈顿距离拦,房址在头顶 5 格就被判成"没走到"直接不盖了。
     at = _slim(mod_get("/state"))["pos"]
-    d = abs(at["x"] - hx) + abs(at["y"] - hy)
-    if d > 4:
-        say(f"没走到房址(还差{d}格,停在 {at['x']},{at['y']}),不盖了。", bot=True)
+    dx = abs(at["x"] - hx)
+    if dx > 4:
+        say(f"没走到房址那一带(横向还差{dx}格,停在 {at['x']},{at['y']}),不盖了。", bot=True)
         return True
 
     say("开始盖房子。", bot=True)
