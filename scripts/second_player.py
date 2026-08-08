@@ -1110,18 +1110,8 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
 
 
 # ── 盖房子 ─────────────────────────────────────────────────────────────────────
-# 编排照搬 foundation.py(建造原语已经在 mod 里:place_at/hop_up/bridge/
-# pillar/settle/drop/walk_place/place_walls)。房子就是一个 21 宽 × 10 高的矩形。
-H_ROPE, H_FLOOR, H_WOOD = 965, 94, 9           # 绳 / 木平台 / 木材
-H_WORKBENCH, H_TABLE, H_CHAIR, H_WALL, H_TORCH = 36, 32, 34, 93, 8
-H_LEN, H_PILLAR, H_SUP, H_ROOF = 20, 9, 8, 20
-H_WALL_ORDER = [
-    (1, 2), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2),
-    (6, 3), (6, 4), (6, 5),
-    (5, 5), (4, 5), (3, 5), (2, 5), (1, 5),
-    (1, 4), (1, 3),
-    (2, 3), (3, 4), (4, 3), (5, 4),
-]
+# 编排全在 mod 里(HouseBuilder):这边只选址 + 触发 + 等结果。
+# 尺寸、坐标、放置顺序都在那边,不在这里重复一份。
 
 
 def _hwait(path, timeout=90):
@@ -1134,156 +1124,20 @@ def _hwait(path, timeout=90):
     return mod_get(path)
 
 
-def _hprobe(x, y):
-    return mod_post("/probe_cell", {"x": x, "y": y})
-
-
 def _build_house(ax, ay):
-    """在 (ax,ay)=房子矩形的左下角 开工。失败返回错误字符串,成功返回 None。"""
-    # 以前第一步是 20 格绳梯,绳子只能靠开箱/砸罐碰运气,经常凑不齐就卡死在这。
-    # 现在选址只要求 21×10 全空,人自己垫平台上去 —— 平台随时能用木材合。
-    #
-    # 先对齐到左下角那一列:nav 的容差是 24px(1.5格),停在隔壁列也算"到了",
-    # 而后面每一步都拿 ax 当锚点,差一格整座房子就偏了。
-    mod_post("/settle", {"col": ax})
-    _hwait("/settle_status", 20)
-    o = mod_post("/origin", {})
-    if o.get("cx") != ax:
-        return f"站不到房子左下角那一列(要{ax},在{o.get('cx')})"
+    """在 (ax,ay)=房子矩形左下角 盖 4 间房。编排整个在 mod 里(HouseBuilder)。
+    失败返回错误字符串,成功返回 None。
 
-    # 人可能站在洞底或半坡上,垫到"地板下面那一行":地板放在 ay,人得站在 ay+1 才够得着往上放。
-    # 一次垫一格再读 origin,垫不动就是真上不去了 —— 不猜要垫几格。
-    for _ in range(40):
-        cy = mod_post("/origin", {}).get("cy")
-        if cy is None:
-            return "读不到 origin"
-        if cy <= ay + 1:
-            break
-        # col 不传:pillar 会先把身体从这一列让开再砌(传了 col 它认为调用方已安置好人)
-        mod_post("/pillar", {"item": str(H_FLOOR), "n": 1})
-        st = _hwait("/pillar_status", 30)
-        if st.get("placed", 0) < 1:
-            return f"垫不上去(还在 cy={cy},要到 {ay + 1}):{st.get('reason') or st.get('outcome')}"
-        mod_post("/hop_up", {"row": cy - 1})
-        _hwait("/hop_up_status", 20)
-        mod_post("/settle", {"col": ax})
-        _hwait("/settle_status", 20)
-    else:
-        return f"垫了40次还没到 {ay + 1}"
-    print(f"[house] 就位 ({ax},{mod_post('/origin', {}).get('cy')}) 目标左下角 ({ax},{ay})")
-
-    # 地板第一格:bridge 是"站在已铺好的地板上往外接",所以起点这格得先有。
-    mod_post("/place_at", {"item": str(H_FLOOR), "world": [ax, ay]})
-    _hwait("/place_at_status", 30)
-    if not _hprobe(ax, ay).get("has_tile"):
-        return f"({ax},{ay}) 没放上平台"
-    mod_post("/hop_up", {"row": ay})
-    _hwait("/hop_up_status", 20)
-    o = mod_post("/origin", {})
-    if o.get("cy") != ay - 1:
-        return f"没站上平台:cy={o.get('cy')} 应为 {ay-1}"
-
-    mod_post("/bridge", {"item": str(H_WOOD), "dir": "right", "n": H_LEN})
-    print(f"[house] bridge → {_hwait('/bridge_status', 120)}")
-    row = ay
-    missing = [ax + k for k in range(1, H_LEN + 1) if not _hprobe(ax + k, row).get("has_tile")]
-    if missing:
-        return f"地基缺 {len(missing)} 格"
-
-    end_x = ax + H_LEN
-    mod_post("/pillar", {"item": str(H_FLOOR), "n": H_PILLAR, "col": end_x})
-    st = _hwait("/pillar_status", 90)
-    print(f"[house] pillar col={end_x} → {st}")
-    if st.get("placed", 0) < H_PILLAR:
-        return f"柱子没搭够:{st.get('placed')}"
-
-    mod_post("/settle", {"col": end_x}); _hwait("/settle_status", 20)
-    pillar_top = row - (H_PILLAR - 1)
-    mod_post("/hop_up", {"row": pillar_top, "col": end_x}); _hwait("/hop_up_status", 20)
-    mod_post("/settle", {"col": end_x}); _hwait("/settle_status", 20)
-    o = mod_post("/origin", {})
-    if o.get("cx") != end_x or o.get("cy", 99999) > pillar_top - 1:
-        return f"没上到柱顶:({o.get('cx')},{o.get('cy')})"
-
-    roof_row = o["cy"] + 1
-    mod_post("/bridge", {"item": str(H_FLOOR), "dir": "left", "n": H_ROOF})
-    print(f"[house] roof → {_hwait('/bridge_status', 120)}")
-    miss_r = [end_x - k for k in range(1, H_ROOF + 1) if not _hprobe(end_x - k, roof_row).get("has_tile")]
-    if miss_r:
-        return f"屋顶缺 {len(miss_r)} 格"
-
-    mod_post("/drop", {}); _hwait("/drop_status", 20)
-    base_x1 = end_x - 20
-
-    def wx(local):
-        return base_x1 + (local - 1)
-
-    for anchor_lx, pillar_lxs in ((3, [1, 6]), (8, [11]), (13, [16])):
-        mod_post("/settle", {"col": wx(anchor_lx)}); _hwait("/settle_status", 30)
-        for plx in pillar_lxs:
-            mod_post("/pillar", {"item": str(H_FLOOR), "n": H_SUP, "col": wx(plx)})
-            print(f"[house] support x{plx} → {_hwait('/pillar_status', 90)}")
-
-    mod_post("/settle", {"col": wx(19)}); _hwait("/settle_status", 30)
-    o = mod_post("/origin", {})
-    floor_row = o["cy"]
-
-    def _held():
-        out = {}
-        for it in mod_get("/state").get("equipment", {}).get("items", []):
-            i = it.get("id")
-            if i:
-                out[i] = out.get(i, 0) + it.get("stack", 0)
-        return out
-
-    have = _held()
-    if have.get(H_WORKBENCH, 0) < 1:
-        r = mod_post("/craft", {"item_id": H_WORKBENCH, "amount": 1})
-        print(f"[house] craft workbench → {r}")
-        have = _held()
-    mod_post("/settle", {"col": wx(19)}); _hwait("/settle_status", 30)
-    mod_post("/place_at", {"item": str(H_WORKBENCH), "world": [wx(19), floor_row]})
-    st = _hwait("/place_at_status", 20)
-    print(f"[house] place workbench @({wx(19)},{floor_row}) → {st}")
-    if not _hprobe(wx(19), floor_row).get("has_tile"):
-        return f"工作台没放上 ({wx(19)},{floor_row}):{st}"
-
-    for _ in range(40):     # 工作台放下后配方要几帧才出现
-        if any(rc.get("item_id") == H_TABLE for rc in mod_get("/state").get("available_recipes", [])):
-            break
-        time.sleep(0.1)
-    else:
-        return "工作台放下了但木桌配方没出现 —— 站得太远?"
-    for item, need, nm in ((H_TABLE, 3, "木桌"), (H_CHAIR, 4, "木椅"), (H_WALL, 96, "木墙")):
-        short = need - have.get(item, 0)
-        r = None
-        if short > 0:
-            r = mod_post("/craft", {"item_id": item, "amount": short})
-            print(f"[house] craft {nm} ×{short} → {r}")
-        got = _held().get(item, 0)
-        if got < need:
-            why = {"inventory_full": "背包满了", "no_more_materials": "材料不够",
-                   "no_recipe": "没这个配方(工作台不对?)"}.get((r or {}).get("stop"), "")
-            tail = f"({why},空槽{r.get('free_slots')})" if r and why else ""
-            return f"{nm}只有{got}/{need}{tail}"
-
-    mod_post("/walk_place", {"dest_x": wx(3),
-                             "targets": [{"x": wx(lx), "y": floor_row, "item": str(H_TABLE)} for lx in (14, 9, 4)]})
-    print(f"[house] tables → {_hwait('/walk_place_status', 60)}")
-    mod_post("/walk_place", {"dest_x": wx(19),
-                             "targets": [{"x": wx(lx), "y": floor_row, "item": str(H_CHAIR)} for lx in (2, 7, 12, 17)]})
-    print(f"[house] chairs → {_hwait('/walk_place_status', 60)}")
-
-    for k in range(4):
-        col1 = 1 + 5 * k
-        cells = [[wx(col1 + (c - 1)), roof_row + rr] for (rr, c) in H_WALL_ORDER]
-        stand_col = wx({0: 4, 1: 9, 2: 14, 3: 19}[k])
-        mod_post("/settle", {"col": stand_col}); _hwait("/settle_status", 30)
-        mod_post("/hop_up", {"row": floor_row, "col": stand_col}); _hwait("/hop_up_status", 30)
-        mod_post("/place_walls", {"item": str(H_WALL), "cells": cells})
-        print(f"[house] room{k} walls → {_hwait('/place_walls_status', 120)}")
-        mod_post("/place_at", {"item": str(H_TORCH), "world": [wx(col1 + 2), roof_row + 2]})
-        _hwait("/place_at_status", 30)
+    以前这一整套编排写在这里,而单间那套在 mod 里 —— 同一份坐标推了两遍,
+    于是同一个 off-by-one 反复出现(柱子歪一格、屋顶铺半空)。现在只有 mod 那一份。
+    """
+    r = mod_post("/build_house", {"rooms": 4, "dir": 1, "x": ax, "y": ay})
+    if not r.get("accepted"):
+        return f"盖房被拒:{r.get('reason')}"
+    st = _hwait("/build_house_status", 600)
+    print(f"[house] {st}")
+    if st.get("outcome") != "done":
+        return f"{st.get('reason') or st.get('outcome')}(卡在 {st.get('phase')})"
     return None
 
 
