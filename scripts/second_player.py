@@ -1042,6 +1042,7 @@ CHOP_FRAMES = 60
 WALK_FRAMES_PER_TILE = 4.0     # 走一格约几帧,用来把距离折成时间
 WOOD_PER_TRUNK = 1.6           # 一格树干约出几个木头,把高度折成收益帧数
 TOWARD_BONUS = 25              # 顺路(朝丛林方向)的小让利,防止贪心来回横跳
+MIN_TRUNK_H = 6                # 矮于这个的一律不砍:h=1 是枝叶,h≤5 是树苗,砍它跟砍大树一样费时间
 
 
 def _tallest_trunks(tiles, skip, px=None, toward=0):
@@ -1059,8 +1060,8 @@ def _tallest_trunks(tiles, skip, px=None, toward=0):
             if i == len(ys) or ys[i][0] != ys[i - 1][0] + 1:
                 seg = ys[s:i]
                 base = seg[-1][0]                     # 树干底部,砍这里
-                if (x, base) not in skip:
-                    h = len(seg)
+                h = len(seg)
+                if h >= MIN_TRUNK_H and (x, base) not in skip:
                     dist = min(d for _, d in seg)
                     score = (CHOP_FRAMES + dist * WALK_FRAMES_PER_TILE
                              - h * WOOD_PER_TRUNK * CHOP_FRAMES / 10.0)
@@ -1081,7 +1082,8 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400, toward=0):
         have = _have(need_name)
         if have >= need_n:
             return True
-        n = 60 if act == "chop" else 20
+        # 砍树要 400 格:find_tiles 按距离截断,脚边一片树苗就能占满配额,远处的大树根本进不了候选
+        n = 400 if act == "chop" else 20
         r = mod_post("/find_tiles", {"name": what, "n": n, "max_dist": max_dist})
         tiles = [t for t in (r.get("tiles") or []) if (t["x"], t["y"]) not in skip]
         if not tiles:
@@ -1090,6 +1092,7 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400, toward=0):
             px = _slim(mod_get("/state"))["pos"]["x"] if toward else None
             trunks = _tallest_trunks(tiles, skip, px=px, toward=toward)
             if not trunks:
+                print(f"[run1] 附近 {max_dist} 格内没有 h>={MIN_TRUNK_H} 的树")
                 return False
             tx, ty = trunks[0]
         else:
