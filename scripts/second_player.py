@@ -1087,8 +1087,8 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400, toward=0):
         if not tiles:
             return False
         if act == "chop":
-            pos = _slim(mod_get("/state"))["pos"]
-            trunks = _tallest_trunks(tiles, skip, px=pos[0], toward=toward)
+            px = _slim(mod_get("/state"))["pos"]["x"] if toward else None
+            trunks = _tallest_trunks(tiles, skip, px=px, toward=toward)
             if not trunks:
                 return False
             tx, ty = trunks[0]
@@ -1215,7 +1215,7 @@ def _run_from_zero():
         jd = 0
         jb = mod_post("/find_biome", {"name": "jungle"})
         if jb.get("found"):
-            here = _slim(mod_get("/state"))["pos"][0]
+            here = _slim(mod_get("/state"))["pos"]["x"]
             jd = 1 if jb["x"] > here else -1
             print(f"[run1] 丛林在 x={jb['x']}(我 {here}),砍树偏向 {'东' if jd > 0 else '西'}")
         ok = _gather_by("Trees", "chop", "木材", RUN1_NEED["木材"], toward=jd)
