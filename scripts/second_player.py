@@ -1037,9 +1037,17 @@ def _wait_pickup(max_s=12):
     return False
 
 
-def _tallest_trunks(tiles, skip):
-    """把 find_tiles 的树格按「同一列 y 连续」切成一棵棵树干,高的排前面。
-    一棵树砍一下整棵倒,所以砍高的效率高得多;h=1 的那些是树枝树叶。"""
+# 砍倒一棵树的时间基本固定(一下整棵倒),和树高无关 —— 高树就是白赚
+CHOP_FRAMES = 60
+WALK_FRAMES_PER_TILE = 4.0     # 走一格约几帧,用来把距离折成时间
+WOOD_PER_TRUNK = 1.6           # 一格树干约出几个木头,把高度折成收益帧数
+TOWARD_BONUS = 25              # 顺路(朝丛林方向)的小让利,防止贪心来回横跳
+
+
+def _tallest_trunks(tiles, skip, px=None, toward=0):
+    """按 cost−bonus 排:cost = 砍的固定耗时 + 走过去的时间,bonus = 树高折成的木头。
+    只按高度排会为了远处一棵大树跑穿半张图;只按距离排又会一直啃小树苗。
+    toward=+1/-1 且给了玩家列 px 时,那个方向的树再让一点,免得每轮最优点左右横跳。"""
     col = {}
     for t in tiles:
         col.setdefault(t["x"], []).append((t["y"], t["dist"]))
@@ -1052,13 +1060,19 @@ def _tallest_trunks(tiles, skip):
                 seg = ys[s:i]
                 base = seg[-1][0]                     # 树干底部,砍这里
                 if (x, base) not in skip:
-                    runs.append((len(seg), -min(d for _, d in seg), x, base))
+                    h = len(seg)
+                    dist = min(d for _, d in seg)
+                    score = (CHOP_FRAMES + dist * WALK_FRAMES_PER_TILE
+                             - h * WOOD_PER_TRUNK * CHOP_FRAMES / 10.0)
+                    if toward and px is not None and (x - px) * toward > 0:
+                        score -= TOWARD_BONUS
+                    runs.append((score, x, base))
                 s = i
-    runs.sort(reverse=True)                            # 高度降序,同高取近的
-    return [(x, y) for _, _, x, y in runs]
+    runs.sort()                                        # 净成本升序,最划算的在前
+    return [(x, y) for _, x, y in runs]
 
 
-def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
+def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400, toward=0):
     """找最近的 what → 走过去 → 对它做 act,直到 need_name 够 need_n。
     True=够了 / False=没得找了 / None=被打断。"""
     skip = set()
@@ -1073,7 +1087,8 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
         if not tiles:
             return False
         if act == "chop":
-            trunks = _tallest_trunks(tiles, skip)
+            pos = _slim(mod_get("/state"))["pos"]
+            trunks = _tallest_trunks(tiles, skip, px=pos[0], toward=toward)
             if not trunks:
                 return False
             tx, ty = trunks[0]
@@ -1196,7 +1211,14 @@ def _run_from_zero():
     # ── 1. 木材 ──────────────────────────────────────────────────────────────
     if _have("木材") < RUN1_NEED["木材"]:
         say(f"先砍树,要{RUN1_NEED['木材']}木材。", bot=True)
-        ok = _gather_by("Trees", "chop", "木材", RUN1_NEED["木材"])
+        # 顺着丛林方向砍:等量的木头,砍完顺带也走近了 —— 也压住贪心每轮左右横跳
+        jd = 0
+        jb = mod_post("/find_biome", {"name": "jungle"})
+        if jb.get("found"):
+            here = _slim(mod_get("/state"))["pos"][0]
+            jd = 1 if jb["x"] > here else -1
+            print(f"[run1] 丛林在 x={jb['x']}(我 {here}),砍树偏向 {'东' if jd > 0 else '西'}")
+        ok = _gather_by("Trees", "chop", "木材", RUN1_NEED["木材"], toward=jd)
         if ok is None:
             return True
         if not ok:
