@@ -512,12 +512,12 @@ def _worth_detour(cat, tx, ty):
     return ok
 
 
-# 掏空的箱子还立在原地,地图分不出开没开过 —— 不自己记就会一遍遍回去开同一个
-_looted_chests = set()
+# 处理过就别再回来:掏空的箱子还立在原地,够不着的水晶也还在 —— 地图都分不出来,得自己记
+_done_treasures = set()
 
 
 def _looted(t):
-    return (t["x"], t["y"]) in _looted_chests
+    return (t["x"], t["y"]) in _done_treasures
 
 
 def _greed_collect(cat, t):
@@ -541,14 +541,20 @@ def _greed_collect(cat, t):
         run_tool("interact", {"x": tx, "y": ty})
         run_tool("loot_all", {})
         # 掏空的箱子不消失,地图证实不了 —— 记下来,别再回来开第二遍
-        _looted_chests.add((tx, ty))
+        _done_treasures.add((tx, ty))
         return "got", None
     slot = _best_tool_slot("pick")
-    run_tool("use_item", {"x": tx, "y": ty, "strict": True,
-                          "slot": slot if slot is not None else -1, "duration_ticks": 0})
+    res = json.loads(run_tool("use_item", {"x": tx, "y": ty, "strict": True,
+                                           "slot": slot if slot is not None else -1, "duration_ticks": 0}))
     # a mined heart is GONE from the map: ask, don't assume
     cell = mod_post("/probe_cell", {"x": tx, "y": ty})
-    return ("got" if not cell.get("has_tile") else "missed"), None
+    if not cell.get("has_tile"):
+        return "got", None
+    # 够不着/啃不动就别再回来 —— 被怪推开后重新导航,又推开,来回空跑
+    if res.get("reason") in ("out_of_reach", "tool_weak", "blocked"):
+        print(f"[greed]   拉黑 ({tx},{ty}):{res.get('reason')}")
+        _done_treasures.add((tx, ty))
+    return "missed", None
 
 
 def run_tool(name, args):
@@ -1375,9 +1381,12 @@ def run_find_template(spec):
                         if done_count >= count:
                             break
                     elif why == "out_of_reach":
-                        # mining below moved the body (fell into own hole) → the whole batch's stance is stale.
-                        # Stop swinging at ghosts; the outer loop re-locates from where we actually stand now.
+                        # 挖脚下会把人挪走(掉进自己挖的洞),整批的站位就废了。别对着空气挥,
+                        # 交给外层从真实位置重新定位 —— 但这一格要拉黑,不然被击退后又走回来,循环。
+                        skip.add((ox, oy))
                         break
+                    elif out != "removed":
+                        skip.add((ox, oy))
                     # target_gone → already vanished, try the next candidate
                 print(f"[tmpl] mine batch → +{mined_here} in reach [{reach['lx']},{reach['ly']}..{reach['hx']},{reach['hy']}]")
             if done_count >= count:
