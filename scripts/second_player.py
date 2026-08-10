@@ -1214,15 +1214,14 @@ def _run_from_zero():
         say(f"附近没地方盖(要 21×10 的净空;扫了{sf.get('scanned')}格)。", bot=True)
         return True
     hx, hy = sf["at"]
-    # 走到左下角【旁边一列、下面一行】,不是左下角本身:(hx,hy) 那格是要放出来的那块平台
-    # (原来绳子阶段最后放的那块),现在还不存在,人站不上去。站旁边一列身体才让开它。
-    sx, sy = hx - HOUSE_DIR, hy + 1
-    say(f"房址 ({hx},{hy}) 左下角,先走到旁边 ({sx},{sy})。", bot=True)
-    nav = json.loads(run_tool("nav_to", {"x": sx, "y": sy}))
+    # 走到房址那一带就行,精准踩上左下角是 mod 里 Ph.Lift 的事(垫平台/掉下来/对齐都在那边)。
+    # 这里不再拦"站位对不对" —— 站位不对不是失败,是还没到。
+    say(f"房址 ({hx},{hy}) 左下角,走过去。", bot=True)
+    nav = json.loads(run_tool("nav_to", {"x": hx, "y": hy}))
     if nav.get("status") == "interrupted":
         return True
     at = _slim(mod_get("/state"))["pos"]
-    print(f"[house] 到位 {at},要脚踩 ({sx},{sy})")
+    print(f"[house] 到房址一带 {at},要脚踩 ({hx},{hy})")
 
     _top_up_platforms(RUN1_BUILD_WOOD)
     say("开始盖房子。", bot=True)
