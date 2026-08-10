@@ -34,10 +34,7 @@ NAV_REPORT_S = 12       # progress-note cadence while walking
 MAX_TURNS = 60          # tool-loop turns per task (runaway guard)
 HISTORY_MAX_MSGS = 80   # rolling conversation memory across tasks
 
-# RATE LIMIT. The endpoint allows RPM requests per minute (default 10). Bursting past it makes the server silently
-# QUEUE the extra call for ~60s — indistinguishable from a hung model unless we say so. So we self-throttle to one
-# request per MIN_CALL_GAP_S, and whenever we do have to wait, print it loudly so the user knows it's the quota, not
-# the model. Override RPM via env when the endpoint changes.
+# 超了 RPM 服务器会把多的调用静默排队 ~60s,看着和模型卡死一样 —— 所以自己限速,等的时候大声说
 RPM = int(os.environ.get("SECOND_PLAYER_RPM") or os.environ.get("COMMANDER_RPM", "10"))
 MIN_CALL_GAP_S = 60.0 / RPM + 0.5   # a little headroom over the exact window
 _last_llm_call = 0.0
@@ -98,10 +95,7 @@ def say(text, bot=False):
 
 
 # ---------------- event channel (game ↔ agent, WebSocket on /ws) ----------------
-# The mod pushes events (player chat, nav_done, ...) so we react instantly instead of polling.
-# Bidirectional: ws_send() can push low-latency messages back to the game (e.g. interrupts) without
-# an HTTP round-trip. A background thread holds the connection and drops parsed events into _events;
-# instructions are split into _instructions for next_instruction().
+# mod 推事件过来,不用轮询;ws_send() 反向推(比如打断)也不用走 HTTP
 WS_URL = MOD.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
 _events = queue.Queue()
 _instructions = queue.Queue()
@@ -670,10 +664,7 @@ def run_tool(name, args):
             "strict": bool(args.get("strict"))})
         if not r.get("ok"):
             return json.dumps(r)
-        # Wait for the real result. A collect target (chop/mine) ends by OBSERVING the world fact — "removed" (tile
-        # gone) or "no_progress" (can't dent it) — the mod keeps swinging until then, so we poll until it's done, not
-        # to a swing budget. A non-collect use (bomb/potion) has no result tile and ends at n/a on the mod's budget.
-        # A generous safety cap only guards against a hang, it is NOT the completion condition.
+        # 采集类挥到地图说"没了"为止,不按次数;这里的超时只防挂死,不是完成判据
         deadline = time.monotonic() + 60.0
         st = {"active": True, "outcome": "running"}
         while time.monotonic() < deadline:
@@ -703,9 +694,7 @@ def run_tool(name, args):
                 return json.dumps({"status": "cleared", "note": "附近没有敌人了"})
         mod_post("/fight", {"active": False})
         return json.dumps({"status": "timeout", "note": "打了一阵,可能还有敌人"})
-    # act: raw action primitive. The mod runs the step machine frame by frame; we just block until it settles and
-    # hand back WHATEVER it saw. On failure the scene (cursor/target/player/held + why) goes to the LLM verbatim —
-    # it is supposed to diagnose from the numbers, so summarising or trimming here would defeat the point.
+    # 失败时把现场原样交给 LLM —— 它要靠数字诊断,这里概括或删减就白费了
     if name == "act":
         r = mod_post("/act", {"steps": args["steps"],
                               "timeout_frames": args.get("timeout_frames", 1800)})
@@ -775,10 +764,7 @@ SYSTEM = """你是 TB,Terraria 里的 AI 二号玩家,和人类搭档。接到�
 
 
 # ============================ 甲方案: plan-once + self-execute (LLM-Planner style) ============================
-# The brain plans a whole flat action sequence in ONE call, the executor runs it with no LLM per step, and the brain
-# is only woken again on failure/interruption. This is the RPM=10 survival strategy: brain calls track surprises,
-# not steps. Matches LLM-Planner (arXiv 2212.04088): flat plan, objects grounded at execution time via placeholders,
-# replanning on execution failure with completed-steps + current-state in the prompt.
+# 脑一次规划完,手自己跑,只有失败才回脑 —— RPM=10 下脑的调用要跟着意外走,不跟着步数走
 
 PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 + 当前现状,你一次性输出一条动作序列(JSON),
 执行器会自己按序执行,不再回来问你,除非某步失败。所以要一次规划到位。
@@ -822,12 +808,8 @@ tile 名不确定就用常见的(树=Trees,铁矿=Iron,箱子=Containers)。plan
 只输出 JSON。"""
 
 
-# ============================ FIND-CLASS TEMPLATE ============================
-# Nearly every concrete Terraria task is "there's a thing in the world, go do something to it": chop tree, mine ore,
-# go to a biome, open a chest, fight a mob. They ALL share ONE skeleton — locate → nav → act → repeat-until — and
-# differ only in a handful of variables. So instead of letting the AI freely emit ops (where it hallucinates: bombs
-# to clear a path, invents '探针'), the AI only FILLS THE VARIABLES; code runs the fixed skeleton. AI can't add
-# steps, can't invent tools. One tiny AI call per goal instead of per step.
+# ========== FIND-CLASS TEMPLATE:砍树/挖矿/开箱/打怪同一骨架 locate→nav→act→repeat ==========
+# 只让 AI 填变量,骨架由代码跑 —— 它加不了步骤也编不出工具(以前会编"探针"、拿炸弹开路)
 
 FIND_CLASSIFIER_SYSTEM = """把玩家的目标填成一张变量表(JSON),别的不做。这类目标的共同形状是:
 「世界上有个东西,找到它→走过去→对它做点什么→重复到够」。只要目标是这个形状,就填表:
@@ -1111,8 +1093,7 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400):
 
 
 # ── 盖房子 ─────────────────────────────────────────────────────────────────────
-# 编排全在 mod 里(HouseBuilder):这边只选址 + 触发 + 等结果。
-# 尺寸、坐标、放置顺序都在那边,不在这里重复一份。
+# 编排全在 mod 的 HouseBuilder:这边只选址+触发+等结果,尺寸坐标顺序不在这儿重复一份
 
 
 def _hwait(path, timeout=90):
@@ -1163,9 +1144,11 @@ def _top_up_platforms(reserve=0):
     return now
 
 
-def _collect_until_rope(need):
-    """沿 descent_route 的宝藏链走,绳子够了就停(不走完全程)。
+def _collect_along_route(item, need, tag):
+    """沿 descent_route 的宝藏链走,东西够了就停(不走完全程)。
     None=被打断 / True=够了 / False=走完了还不够。"""
+    if _have(item) >= need:
+        return True
     r = mod_post("/descent_route", {"name": "jungle"})
     if not r.get("found"):
         say("没找到下地狱的主道。", bot=True)
@@ -1174,20 +1157,20 @@ def _collect_until_rope(need):
     kinds = {}
     for t in plan:
         kinds[t["kind"]] = kinds.get(t["kind"], 0) + 1
-    print("[rope] 路上: " + (", ".join(f"{_KN.get(k,k)}×{v}" for k, v in sorted(kinds.items())) or "啥也没有"))
+    print(f"[{tag}] 路上: " + (", ".join(f"{_KN.get(k,k)}×{v}" for k, v in sorted(kinds.items())) or "啥也没有"))
     for i, t in enumerate(plan):
-        if _have("绳") >= need:
-            say(f"绳子够了({_have('绳')}),收手。", bot=True)
+        if _have(item) >= need:
+            say(f"{item}够了({_have(item)}),收手。", bot=True)
             return True
         if t["kind"] == "heart":
-            continue                      # 现在只为绳子跑这一趟
-        print(f"[rope] [{i+1}/{len(plan)}] {t['kind']} ({t['x']},{t['y']})")
+            continue                      # 这趟只为补货,血量另说
+        print(f"[{tag}] [{i+1}/{len(plan)}] {t['kind']} ({t['x']},{t['y']})")
         outcome, intr = _greed_collect("Containers", t)
         if outcome == "interrupted":
             say("(被打断,停下待命)", bot=True)
             return None
-        print(f"[rope]   {outcome} → 绳{_have('绳')}/{need}")
-    return _have("绳") >= need
+        print(f"[{tag}]   {outcome} → {item}{_have(item)}/{need}")
+    return _have(item) >= need
 
 
 def _run_from_zero():
@@ -1205,8 +1188,18 @@ def _run_from_zero():
     _top_up_platforms(RUN1_BUILD_WOOD)
     say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
 
-    # 盖房不再需要绳子(垫脚改成平台),所以这里不为绳子专门跑一趟 —— 绳子只能靠开箱砸罐,
-    # 凑不齐就卡死在盖房前。下地狱路上顺手收到的绳子照样留着用。
+    # ── 2. 火把 ──────────────────────────────────────────────────────────────
+    # 火把合不出来(要凝胶,这世界不刷怪),只能开箱砸罐;顺下丛林的路收,够了就回头盖房
+    need_torch = RUN1_NEED["火把"]
+    if _have("火把") < need_torch:
+        say(f"火把不够({_have('火把')}/{need_torch}),顺着下丛林的路开箱子。", bot=True)
+        got = _collect_along_route("火把", need_torch, "torch")
+        if got is None:
+            return True
+        if not got:
+            say(f"路上的箱子开完了,火把只有{_have('火把')}/{need_torch},没光 NPC 不住,盖不了。", bot=True)
+            return True
+
     # ── 3. 地表盖房 ──────────────────────────────────────────────────────────
     # 房子就是一个 21×10 的矩形,at 是左下角。选址只问一件事:这个框里空不空。
     sf = mod_post("/scan_house", {"w": 21, "h": 10, "range": 200})
@@ -1310,9 +1303,7 @@ def run_find_template(spec):
             tx, ty = tiles[0]["x"], tiles[0]["y"]
         print(f"[tmpl] locate → ({tx},{ty})")
 
-        # ---- NAV ---- (assume nav works, per current scope). MINING navigates EXACT: the ore sits inside solid rock
-        # the body can't stand on, so nav digs a shaft straight down to that tile — arrival IS the ore mined out, no
-        # separate swing needed. Everything else navigates to a standable cell beside the target, then acts.
+        # ---- NAV ---- 挖矿用 exact:矿在实心岩里人站不上去,nav 直接挖竖井过去,到了矿就没了,不用再挥
         nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty, "exact": act == "mine"}))
         print(f"[tmpl] nav → {nav.get('status')} @ {nav.get('state',{}).get('pos')}")
         if nav.get("status") in ("walled_in", "loop_unresolved", "timeout") or nav.get("status") == "failed":
@@ -1321,9 +1312,7 @@ def run_find_template(spec):
 
         # ---- ACT ----  ONE target's completion is the observed world fact: the tile is REMOVED.
         if act == "mine":
-            # exact-nav dug a shaft to the nearest ore (it's gone now). The body now stands INSIDE the vein, so a
-            # whole cluster of the same ore sits within reach. Batch-mine every reachable one from this stance —
-            # like a human clearing a pocket before moving on — instead of navigating to each ore separately.
+            # 人现在站在矿脉里,周围一片都够得着 —— 站着一次挖光,别一颗一颗 nav 过去
             done_count += 1                       # the shaft-target ore itself
             reach = mod_get("/mine_reach")
             if not reach.get("error"):
@@ -1373,9 +1362,7 @@ def run_find_template(spec):
         # act == "none" → arriving was the goal
 
         done_count += 1
-        # ---- DONE? ----  count vs gather are mutually exclusive. If the user gave an explicit count (>1), that wins
-        # even if the AI also (wrongly) filled gather — "砍2棵" must not stop because inventory already had wood.
-        # gather only applies when no explicit count was given (count defaulted to 1).
+        # ---- DONE? ---- 明确给了数量就以数量为准:"砍2棵"不能因为背包已有木头就不砍
         gather = (spec.get("gather") or "").strip()
         if gather and count <= 1:
             m = re.match(r"(.+?)\s*>=\s*(\d+)", gather)
@@ -1432,9 +1419,7 @@ def slim_world_for_planner():
         elif it.get("pick"): tag = f" pick{it['pick']}"
         elif it.get("hammer"): tag = f" hammer{it['hammer']}"
         line = f"[{it.get('slot')}]{it.get('name')}x{it.get('stack')}{tag}"
-        # Attach the GAME'S OWN tooltip for functional items (wands/potions/hooks/summons land in misc/consumable) —
-        # the brain has no reliable memory of what "和谐杖" does and will invent "needs mana". The vanilla tooltip is
-        # authoritative and un-inventable. Tools/blocks are self-evident from tag, skip them.
+        # 功能性道具附上原版 tooltip:脑记不住"和谐杖"是干嘛的,会自己编("需要魔力")
         cat = it.get("category", "misc")
         if tip_budget > 0 and cat in ("misc", "consumable"):
             info = mod_post("/item_info", {"slot": it.get("slot")})
@@ -1506,9 +1491,7 @@ def exec_op(op, results):
     if o == "say":
         say(op.get("content") or op.get("text") or "")
         return json.dumps({"ok": True})
-    # The planner keeps reaching for `find` on a biome (JungleGrass/LihzahrdBrick) even when told to use find_biome —
-    # a local tile scan can't see a far biome, so it returns empty and the plan dies. Code-level correction: if the
-    # target is a known biome, route to find_biome regardless of which op the planner picked. Don't rely on the prompt.
+    # 规划器总对生物群系用 find(本地扫描看不见远处,返回空计划就死),代码兜底改判,别指望提示词
     if o in ("find", "find_biome"):
         biome = _biome_of(op.get("what", ""))
         if biome:
