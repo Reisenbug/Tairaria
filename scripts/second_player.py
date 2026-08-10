@@ -512,6 +512,14 @@ def _worth_detour(cat, tx, ty):
     return ok
 
 
+# 掏空的箱子还立在原地,地图分不出开没开过 —— 不自己记就会一遍遍回去开同一个
+_looted_chests = set()
+
+
+def _looted(t):
+    return (t["x"], t["y"]) in _looted_chests
+
+
 def _greed_collect(cat, t):
     """One side-trip for whitelisted loot while traveling: chest → open+loot, anything else → pick it out.
     Fails FAST — can't reach or can't dent means give up and move on; the journey matters more than any
@@ -527,11 +535,13 @@ def _greed_collect(cat, t):
     if nav.get("status") == "interrupted":
         return "interrupted", nav
     if not nav.get("done") and nav.get("status") != "done":
+        print(f"[greed]   放弃 ({tx},{ty}):nav {nav.get('status')} {nav.get('reason','')}")
         return "missed", None
     if cat == "Containers":
         run_tool("interact", {"x": tx, "y": ty})
         run_tool("loot_all", {})
-        # a looted chest still stands there, so the map cannot confirm this one — trust the inventory instead
+        # 掏空的箱子不消失,地图证实不了 —— 记下来,别再回来开第二遍
+        _looted_chests.add((tx, ty))
         return "got", None
     slot = _best_tool_slot("pick")
     run_tool("use_item", {"x": tx, "y": ty, "strict": True,
@@ -623,7 +633,7 @@ def run_tool(name, args):
                     for cat in greed:
                         rr = mod_post("/find_tiles", {"name": cat, "n": 5, "max_dist": 25})
                         for t in (rr.get("tiles") or []):
-                            if (t["x"], t["y"]) in visited:
+                            if (t["x"], t["y"]) in visited or _looted(t):
                                 continue
                             if not _worth_detour(cat, t["x"], t["y"]):
                                 visited.add((t["x"], t["y"]))   # 太远,别每3秒重问一次
@@ -938,6 +948,9 @@ def _run_descend(bname):
         # straight to the treasure: the chain already priced the detour, so there is no junction hop first
         # kind 现在有 chest / wood_chest / heart 三种,木箱也是箱子 —— 别把它判成 Heart
         cat = "Heart" if t["kind"] == "heart" else "Containers"
+        if cat == "Containers" and _looted(t):
+            print(f"[descend]   SKIP — ({t['x']},{t['y']}) 这箱子我开过了")
+            continue
         outcome, intr = _greed_collect(cat, t)
         if outcome == "interrupted":
             say("(被打断,停下待命)", bot=True); return True
@@ -1164,6 +1177,9 @@ def _collect_along_route(item, need, tag):
             return True
         if t["kind"] == "heart":
             continue                      # 这趟只为补货,血量另说
+        if _looted(t):
+            print(f"[{tag}] [{i+1}/{len(plan)}] ({t['x']},{t['y']}) 开过了,跳过")
+            continue
         print(f"[{tag}] [{i+1}/{len(plan)}] {t['kind']} ({t['x']},{t['y']})")
         outcome, intr = _greed_collect("Containers", t)
         if outcome == "interrupted":
