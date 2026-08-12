@@ -523,15 +523,16 @@ def with_result(base, prev_inv):
     return json.dumps(base, ensure_ascii=False)
 
 
-# 顺路采集的额度。find_tiles 的 max_dist 是直线距离,隔着山的话直线 25 格可能要绕几百格,
-# 所以真正的判据是 path_cost 问出来的实际挖/走格数。只有罐子设限,箱子水晶照旧。
+# 顺路采集的额度,单位是【从人当前位置】走过去要多少格 —— 不是离主线多远。
+# find_tiles 的 max_dist 是直线距离,隔着山直线 25 格可能要绕几百格,所以判据是 path_cost 问出来的真实路径。
 GREED_LIMIT = {"Pots": (3, 10)}      # 最多挖3格、走10格
+GREED_WALK_MAX = 40                  # 其他东西:走这么多格以内就顺路拿
+GREED_DIG_MAX = 4                    # 顺路可以凿几格;再多就不是顺路了
+GREED_DEFAULT = ("Containers", "Heart")   # 不传 greed 时默认盯的东西
 
 
 def _worth_detour(cat, tx, ty):
-    lim = GREED_LIMIT.get(cat)
-    if not lim:
-        return True
+    lim = GREED_LIMIT.get(cat, (GREED_DIG_MAX, GREED_WALK_MAX))
     r = mod_post("/path_cost", {"x": tx, "y": ty})
     if not r.get("ok"):
         # 算不出路就当不值,但要说出来:沉默的 False 和"太远"在日志里长得一模一样
@@ -562,7 +563,7 @@ def _greed_collect(cat, t):
     that as a pickup is how a run reported four treasures it had not necessarily taken."""
     tx, ty = t["x"], t["y"]
     say(f"顺路捡:{t.get('kind') or cat}({tx},{ty})", bot=True)
-    nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))   # no greed here — side-trips don't nest
+    nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty, "greed": []}))   # 顺路里不能再顺路,会无限嵌套
     if nav.get("status") == "interrupted":
         return "interrupted", nav
     if not nav.get("done") and nav.get("status") != "done":
@@ -633,9 +634,11 @@ def run_tool(name, args):
         req = {"gx": args["x"], "gy": args["y"]}
         if args.get("exact"):   # mining: goal is a solid ore the body can't stand on — dig a shaft down to it
             req["exact"] = True
-        greed = [g for g in (args.get("greed") or []) if isinstance(g, str)]
-        # 没传 greed 就整段路不看资源。经过宝藏视而不见,最常见的原因就是这里是空的 —— 说出来
-        print(f"[greed] nav_to({args['x']},{args['y']}) 顺路采集={greed or '关(未传 greed)'}")
+        # 默认就顺路捡箱子和水晶:七个调用点里六个没传 greed,于是走一路全程不看资源 ——
+        # 人贴着木箱走过去都不开。不想要就显式传 greed:[](顺路采集内部就是这么关掉嵌套的)。
+        greed = args.get("greed")
+        greed = [g for g in greed if isinstance(g, str)] if greed is not None else list(GREED_DEFAULT)
+        print(f"[greed] nav_to({args['x']},{args['y']}) 顺路采集={greed or '关'}")
         visited = set()          # loot we already grabbed or gave up on — never circle back
         while True:
             _top_up_platforms()   # 平台是寻路的耗材,每段路开始前补一次
@@ -1079,7 +1082,7 @@ def _wait_pickup(max_s=12):
         far.sort()
         _, tx, ty = far[0]
         print(f"[pickup] 走去捡 ({tx},{ty}),还剩{len(drops)}件")
-        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))
+        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty, "greed": []}))   # 正在捡东西,别中途再拐
         if nav.get("status") == "interrupted":
             return False
     return False
