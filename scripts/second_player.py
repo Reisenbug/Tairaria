@@ -504,11 +504,12 @@ def _worth_detour(cat, tx, ty):
         return True
     r = mod_post("/path_cost", {"x": tx, "y": ty})
     if not r.get("ok"):
+        # 算不出路就当不值,但要说出来:沉默的 False 和"太远"在日志里长得一模一样
+        print(f"[greed] 跳过 {cat}({tx},{ty}):path_cost 算不出路 {r.get('reason') or r}")
         return False
     dig, walk = r.get("dig", 999), r.get("walk", 999)
     ok = dig <= lim[0] and walk <= lim[1]
-    if not ok:
-        print(f"[greed] 跳过 {cat}({tx},{ty}):要挖{dig}走{walk},上限{lim[0]}/{lim[1]}")
+    print(f"[greed] {'接受' if ok else '跳过'} {cat}({tx},{ty}):要挖{dig}走{walk},上限{lim[0]}/{lim[1]}")
     return ok
 
 
@@ -603,6 +604,8 @@ def run_tool(name, args):
         if args.get("exact"):   # mining: goal is a solid ore the body can't stand on — dig a shaft down to it
             req["exact"] = True
         greed = [g for g in (args.get("greed") or []) if isinstance(g, str)]
+        # 没传 greed 就整段路不看资源。经过宝藏视而不见,最常见的原因就是这里是空的 —— 说出来
+        print(f"[greed] nav_to({args['x']},{args['y']}) 顺路采集={greed or '关(未传 greed)'}")
         visited = set()          # loot we already grabbed or gave up on — never circle back
         while True:
             _top_up_platforms()   # 平台是寻路的耗材,每段路开始前补一次
@@ -638,20 +641,29 @@ def run_tool(name, args):
                     hit = None
                     for cat in greed:
                         rr = mod_post("/find_tiles", {"name": cat, "n": 5, "max_dist": 25})
-                        for t in (rr.get("tiles") or []):
+                        found = rr.get("tiles") or []
+                        # 直线 25 格是硬半径,再近的东西只要超了就根本不在这个列表里 —— 空列表也要记一笔
+                        skipped = []
+                        for t in found:
                             if (t["x"], t["y"]) in visited or _looted(t):
+                                skipped.append(f"({t['x']},{t['y']})已处理")
                                 continue
                             if not _worth_detour(cat, t["x"], t["y"]):
                                 visited.add((t["x"], t["y"]))   # 太远,别每3秒重问一次
                                 continue
                             hit = (cat, t); break
+                        if not hit:
+                            print(f"[greed] 扫 {cat}:半径25内 {len(found)} 个,没选中"
+                                  + (f" ({','.join(skipped)})" if skipped else ""))
                         if hit:
                             break
                     if hit:
                         cat, t = hit
                         visited.add((t["x"], t["y"]))
+                        print(f"[greed] 中途拐去 {cat}({t['x']},{t['y']})")
                         mod_post("/nav_recede_stop", {})
                         outcome, intr = _greed_collect(cat, t)
+                        print(f"[greed] {cat}({t['x']},{t['y']}) 结果={outcome}")
                         if outcome == "interrupted":
                             return json.dumps(intr)   # player spoke during the side-trip — hand it up
                         resume = True
