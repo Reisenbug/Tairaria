@@ -27,6 +27,36 @@ from websockets.sync.client import connect as ws_connect
 
 load_dotenv()
 
+# print 只到终端,谁也回读不了。同一份也写进文件,和 mod 的 TerraBlindLogs 一样能事后翻。
+AGENT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent.log")
+
+
+class _Tee:
+    def __init__(self, stream, path):
+        self.stream = stream
+        self.f = open(path, "a", encoding="utf-8", buffering=1)
+
+    def write(self, s):
+        self.stream.write(s)
+        try:
+            self.f.write(s)
+        except ValueError:
+            pass
+        return len(s)
+
+    def flush(self):
+        self.stream.flush()
+        try:
+            self.f.flush()
+        except ValueError:
+            pass
+
+
+import sys as _sys
+_sys.stdout = _Tee(_sys.stdout, AGENT_LOG)
+_sys.stderr = _Tee(_sys.stderr, AGENT_LOG)
+print(f"\n===== second_player 启动 {time.strftime('%Y-%m-%d %H:%M:%S')} =====")
+
 MOD = "http://127.0.0.1:17878"
 POLL_S = 1.0
 NAV_TIMEOUT_S = 240

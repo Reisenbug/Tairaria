@@ -18,3 +18,4 @@ htmlcov/
 *.so
 .DS_Store
 logs/
+agent.log
