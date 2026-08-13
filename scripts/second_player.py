@@ -993,7 +993,9 @@ def _run_descend(bname):
         th = _descent_h(t["x"], t["y"])
         # 每一站都报:现在在哪、下一个目标是什么、离多远。这是唯一能看出"为什么没拿到"的东西
         d = abs(pos["x"] - t["x"]) + abs(pos["y"] - t["y"])
-        note = f"[{i + 1}/{len(plan)}] 下一个:{t['kind']} ({t['x']},{t['y']}) 距{d}格 H{th}(我{ph})"
+        # 带上人站在哪:只有 H 差看不出它到底在人的哪一边,"擦肩而过还是真在上游"分不了
+        note = (f"[{i + 1}/{len(plan)}] 下一个:{t['kind']} ({t['x']},{t['y']}) "
+                f"距{d}格 H{th}(我{ph}) 我在({pos['x']},{pos['y']})")
         print(f"[descend] {note}")
         say(note, bot=True)
         # H 比我大 = 离地狱更远 = 在身后。可拐一趟出来人就偏了,近的东西会被误判:
