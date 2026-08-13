@@ -529,6 +529,7 @@ GREED_LIMIT = {"Pots": (3, 10)}      # 最多挖3格、走10格
 GREED_WALK_MAX = 40                  # 其他东西:走这么多格以内就顺路拿
 GREED_DIG_MAX = 4                    # 顺路可以凿几格;再多就不是顺路了
 GREED_DEFAULT = ("Containers", "Heart")   # 不传 greed 时默认盯的东西
+SKIP_NEAR_CELLS = 60                 # 下地狱途中:这么近的宝藏不判"在身后",直接去拿
 
 
 def _worth_detour(cat, tx, ty):
@@ -552,7 +553,7 @@ def _looted(t):
     return (t["x"], t["y"]) in _done_treasures
 
 
-def _greed_collect(cat, t):
+def _greed_collect(cat, t, nested=False):
     """One side-trip for whitelisted loot while traveling: chest → open+loot, anything else → pick it out.
     Fails FAST — can't reach or can't dent means give up and move on; the journey matters more than any
     single trinket.
@@ -563,7 +564,10 @@ def _greed_collect(cat, t):
     that as a pickup is how a run reported four treasures it had not necessarily taken."""
     tx, ty = t["x"], t["y"]
     say(f"顺路捡:{t.get('kind') or cat}({tx},{ty})", bot=True)
-    nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty, "greed": []}))   # 顺路里不能再顺路,会无限嵌套
+    # 只禁【第二层】嵌套,不是全禁:计划里那些站点也走这个函数,一刀切关掉的话
+    # 整段下地狱的路上一个顺路的宝都不看 —— 贴着箱子走过去都不开。
+    nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty,
+                                         "greed": [] if nested else list(GREED_DEFAULT)}))
     if nav.get("status") == "interrupted":
         return "interrupted", nav
     if not nav.get("done") and nav.get("status") != "done":
@@ -695,7 +699,8 @@ def run_tool(name, args):
                         visited.add((t["x"], t["y"]))
                         print(f"[greed] 中途拐去 {cat}({t['x']},{t['y']})")
                         mod_post("/nav_recede_stop", {})
-                        outcome, intr = _greed_collect(cat, t)
+                        # 这一层已经是"半路拐弯"了,再往下不许拐 —— 嵌套到此为止
+                        outcome, intr = _greed_collect(cat, t, nested=True)
                         print(f"[greed] {cat}({t['x']},{t['y']}) 结果={outcome}")
                         if outcome == "interrupted":
                             return json.dumps(intr)   # player spoke during the side-trip — hand it up
@@ -991,8 +996,10 @@ def _run_descend(bname):
         note = f"[{i + 1}/{len(plan)}] 下一个:{t['kind']} ({t['x']},{t['y']}) 距{d}格 H{th}(我{ph})"
         print(f"[descend] {note}")
         say(note, bot=True)
-        if ph >= 0 and th >= 0 and th > ph + 30:
-            print(f"[descend]   SKIP — H{th} > 我的H{ph}+30,已经在身后了")
+        # H 比我大 = 离地狱更远 = 在身后。可拐一趟出来人就偏了,近的东西会被误判:
+        # (2915,316) 离我 36 格、H 才高 65,那是斜上方不是走过头 —— 近的一律去拿,折回也就几秒。
+        if d > SKIP_NEAR_CELLS and ph >= 0 and th >= 0 and th > ph + 30:
+            print(f"[descend]   SKIP — H{th} > 我的H{ph}+30 且距{d}格,已经在身后了")
             missed += 1
             skipped += 1
             continue
