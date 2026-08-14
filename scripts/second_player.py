@@ -1007,8 +1007,13 @@ def _run_descend(bname):
         # straight to the treasure: the chain already priced the detour, so there is no junction hop first
         # kind 现在有 chest / wood_chest / heart 三种,木箱也是箱子 —— 别把它判成 Heart
         cat = "Heart" if t["kind"] == "heart" else "Containers"
-        if cat == "Containers" and _looted(t):
-            print(f"[descend]   SKIP — ({t['x']},{t['y']}) 这箱子我开过了")
+        if _looted(t):
+            print(f"[descend]   SKIP — ({t['x']},{t['y']}) 这个我拿过了")
+            continue
+        # 顺路已经捡掉的东西计划里还留着,轮到它时人跑回去捡空气。水晶挖掉就从地图上消失了,
+        # 直接问那一格还在不在最准 —— 掏空的箱子不会消失,那种只能靠 _done_treasures 记着。
+        if not mod_post("/probe_cell", {"x": t["x"], "y": t["y"]}).get("has_tile"):
+            print(f"[descend]   SKIP — ({t['x']},{t['y']}) 那儿已经空了")
             continue
         outcome, intr = _greed_collect(cat, t)
         if outcome == "interrupted":
