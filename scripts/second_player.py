@@ -651,7 +651,6 @@ def run_tool(name, args):
                 return json.dumps(r)
             deadline = time.monotonic() + NAV_TIMEOUT_S
             last_report = time.monotonic()
-            last_greed = time.monotonic()
             resume = False
             while time.monotonic() < deadline:
                 time.sleep(0.5)
@@ -671,13 +670,13 @@ def run_tool(name, args):
                     d = dict(d)
                     d["state"] = _slim(mod_get("/state"))   # where did we end up — no separate get_state needed
                     return json.dumps(d, ensure_ascii=False)
-                # GREED: while traveling, scan for whitelisted loot nearby; grab it, then resume the journey
-                # (receding nav restarts from wherever we stand — the goal field is cached, resume is free).
-                if greed and time.monotonic() - last_greed >= 3.0:
-                    last_greed = time.monotonic()
+                # 赶路时扫附近的白名单目标,捡完接着走(nav 从人站的地方重启,场是缓存的,恢复不花钱)。
+                # 每轮都扫:原来 3 秒一次,人 3 秒跑几十格,捡完一颗转身就走,3 格外的第二颗就甩身后了。
+                if greed:
                     hit = None
                     for cat in greed:
-                        rr = mod_post("/find_tiles", {"name": cat, "n": 5, "max_dist": 25})
+                        # 一颗水晶占 4 格、各算一次命中,n 留宽点免得一两颗就占满名额
+                        rr = mod_post("/find_tiles", {"name": cat, "n": 24, "max_dist": 25})
                         found = rr.get("tiles") or []
                         # 直线 25 格是硬半径,再近的东西只要超了就根本不在这个列表里 —— 空列表也要记一笔
                         skipped = []
