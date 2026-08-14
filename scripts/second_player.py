@@ -681,6 +681,10 @@ def run_tool(name, args):
                         # 直线 25 格是硬半径,再近的东西只要超了就根本不在这个列表里 —— 空列表也要记一笔
                         skipped = []
                         for t in found:
+                            # 正在去的那个别当成"顺路发现":扫描不知道当前目标是谁,会把它判成值得拐,
+                            # 于是停掉导航、重新建场、再走一遍同一个地方。宝藏占好几格,所以按范围排除。
+                            if abs(t["x"] - args["x"]) <= 3 and abs(t["y"] - args["y"]) <= 3:
+                                continue
                             if (t["x"], t["y"]) in visited or _looted(t):
                                 skipped.append(f"({t['x']},{t['y']})已处理")
                                 continue
