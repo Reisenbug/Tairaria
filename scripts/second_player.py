@@ -952,6 +952,7 @@ def _run_descend(bname):
     Python only walks the chain — it does not re-plan it. Progress still defers to the REAL descent field
     (cost-to-hell H): a stop with higher H than the player is behind us — fell past it, got knocked ahead — and
     is skipped rather than climbed back to. The final stretch keeps radius-greed as a net for anything unlisted."""
+    _run_descend.arrived = False   # 只有真正走到地狱那一步才置真;中途任何早退都算没到
     r = mod_post("/descent_route", {"name": bname})
     if not r.get("found"):
         say("没找到下地狱的路线。", bot=True)
@@ -1042,10 +1043,12 @@ def _run_descend(bname):
         if skipped: parts.append(f"{skipped}个在身后没去")
         if missed - skipped: parts.append(f"{missed - skipped}个没够着")
         tail = "," + "、".join(parts)
-    if nav.get("done") or st == "done":
+    arrived = bool(nav.get("done") or st == "done")
+    if arrived:
         say(f"到地狱了,途中{body}{tail}。", bot=True)
     else:
         say(f"下降中断({st}),已{body}{tail}。", bot=True)
+    _run_descend.arrived = arrived      # 到没到,给 /tb 1 接着判断要不要开地狱那套
     return True
 
 
@@ -1332,7 +1335,60 @@ def _run_from_zero():
     # ── 4. 下地狱 ────────────────────────────────────────────────────────────
     _top_up_platforms()
     say("下地狱。", bot=True)
-    return _run_descend("jungle")
+    _run_descend("jungle")
+    if not _run_descend.arrived:
+        return True                     # 没到地狱就别往下走 —— 地狱那套是从"人在地狱"起算的
+
+    # ── 5. 地狱:盖房 → 铺桥 → 召肉山 → 打 ────────────────────────────────────
+    return _run_hell()
+
+
+def _run_hell():
+    """到地狱之后的一整套。编排全在 mod 里(StartHellRun),这边只触发+播报进度。
+
+    别在这儿重推坐标:选址/算线/接力都在 mod 那一份里,python 再算一遍就是第二套判据。
+    """
+    r = mod_post("/hell_run", {})
+    if not r.get("accepted"):
+        say(f"地狱流程起不来:{r.get('reason')}", bot=True)
+        return True
+    say("到地狱了:选址 → 盖房 → 铺桥 → 召肉山。", bot=True)
+
+    # 整段很长:176 格桥要几分钟,还要等入夜让爆破专家回家。给足时间。
+    # 相位变了就播报一次 —— 否则十几分钟一句话没有,看不出死没死
+    seen, last = None, time.time()
+    end = time.time() + 60 * 60
+    while time.time() < end:
+        st = mod_get("/hell_run_status")
+        if st.get("start_error"):
+            say(f"地狱流程起不来:{st['start_error']}", bot=True)
+            return True
+        ph = st.get("phase", "idle")
+        if ph != seen:
+            seen, last = ph, time.time()
+            print(f"[hell] {ph}")
+            say(_HELL_SAY.get(ph.split(":")[0], f"进行中:{ph}"), bot=True)
+        if ph == "idle":
+            break
+        if time.time() - last > 60 * 20:
+            say(f"卡在 {ph} 二十分钟了,停手。", bot=True)
+            mod_post("/hell_run_stop", {})
+            return True
+        time.sleep(0.5)
+
+    if st.get("wof_outcome") == "stuck":
+        say(f"肉山那套没成:{st.get('wof_reason')}", bot=True)
+    return True
+
+
+_HELL_SAY = {
+    "goto": "去桥起点。",
+    "anchor": "放第一格。",
+    "house": "盖房子。",
+    "deck": "铺桥,176 格,要一会儿。",
+    "wof": "房子好了,开始召肉山那套(等天黑 → 买雷管 → 换向导)。",
+    "fight": "肉山出来了,开打。",
+}
 
 
 def _run_build_replay(anchor=None):
