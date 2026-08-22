@@ -538,7 +538,7 @@ def _worth_detour(cat, tx, ty):
     if not r.get("ok"):
         # 算不出路就当不值,但要说出来:沉默的 False 和"太远"在日志里长得一模一样
         print(f"[greed] 跳过 {cat}({tx},{ty}):path_cost 算不出路 {r.get('reason') or r}")
-        return False
+        return None   # None=这次算不出,不是"太远" —— 调用方不许拉黑
     dig, walk = r.get("dig", 999), r.get("walk", 999)
     ok = dig <= lim[0] and walk <= lim[1]
     print(f"[greed] {'接受' if ok else '跳过'} {cat}({tx},{ty}):要挖{dig}走{walk},上限{lim[0]}/{lim[1]}")
@@ -684,8 +684,12 @@ def run_tool(name, args):
                             if (t["x"], t["y"]) in visited or _looted(t):
                                 skipped.append(f"({t['x']},{t['y']})已处理")
                                 continue
-                            if not _worth_detour(cat, t["x"], t["y"]):
-                                visited.add((t["x"], t["y"]))   # 太远,别每3秒重问一次
+                            worth = _worth_detour(cat, t["x"], t["y"])
+                            if not worth:
+                                # 只有【确实太远】才永久拉黑。算不出路(None)是暂时的:走几步
+                                # 换个位置往往就通了,拉黑等于路过也不开。
+                                if worth is False:
+                                    visited.add((t["x"], t["y"]))
                                 continue
                             hit = (cat, t); break
                         if not hit:
