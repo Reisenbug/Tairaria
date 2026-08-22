@@ -567,6 +567,8 @@ def _greed_collect(cat, t, nested=False):
     # 只禁【第二层】嵌套,不是全禁:计划里那些站点也走这个函数,一刀切关掉的话
     # 整段下地狱的路上一个顺路的宝都不看 —— 贴着箱子走过去都不开。
     nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty,
+                                         # 箱子够得着就行;矿要挖,得站到位
+                                         "reach": cat == "Containers",
                                          "greed": [] if nested else list(GREED_DEFAULT)}))
     if nav.get("status") == "interrupted":
         return "interrupted", nav
@@ -638,6 +640,8 @@ def run_tool(name, args):
         req = {"gx": args["x"], "gy": args["y"]}
         if args.get("exact"):   # mining: goal is a solid ore the body can't stand on — dig a shaft down to it
             req["exact"] = True
+        if args.get("reach"):   # 开箱子:够得着就够了,不用挤到箱子那一格
+            req["reach"] = True
         # 默认就顺路捡箱子和水晶:七个调用点里六个没传 greed,于是走一路全程不看资源 ——
         # 人贴着木箱走过去都不开。不想要就显式传 greed:[](顺路采集内部就是这么关掉嵌套的)。
         greed = args.get("greed")
