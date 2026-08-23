@@ -577,8 +577,15 @@ def _greed_collect(cat, t, nested=False):
         return "missed", None
     if cat == "Containers":
         run_tool("interact", {"x": tx, "y": ty})
+        # /interact 只是排队,真结果在 /state 的 last_interact 里。不读就会把
+        # 陷阱箱/上锁箱当成开了,接着 loot_all 掏个空。
+        li = (mod_get("/state").get("last_interact") or "")
+        if li != "opened":
+            print(f"[greed]   ({tx},{ty}) 没开成:{li}")
+            _done_treasures.add((tx, ty))
+            return "missed", None
         run_tool("loot_all", {})
-        # 掏空的箱子不消失,地图证实不了 —— 记下来,别再回来开第二遍
+        # 掏空的箱子不消失,地图证实不了,记下来别再回来开第二遍
         _done_treasures.add((tx, ty))
         return "got", None
     slot = _best_tool_slot("pick")
