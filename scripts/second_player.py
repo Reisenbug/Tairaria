@@ -579,13 +579,15 @@ def _greed_collect(cat, t, nested=False):
         run_tool("interact", {"x": tx, "y": ty})
         # /interact 只是排队,主线程下一帧才真开,真结果在 /state 的 last_interact 里。
         # 【必须等它离开 pending】--- 发完就读只会读到 pending,把开成了的箱子判成没开。
+        # 字段在 equipment 底下,不在顶层 --- 读顶层永远拿到 None,于是永远判"没开成"
         li = "pending"
         for _ in range(20):
-            li = (mod_get("/state").get("last_interact") or "")
+            li = ((mod_get("/state").get("equipment") or {}).get("last_interact") or "")
             if li != "pending":
                 break
             time.sleep(0.1)
-        if li != "opened":
+        # already_open = 上一个箱子还开着,不是这次失败。掏完就是了
+        if li not in ("opened", "already_open"):
             print(f"[greed]   ({tx},{ty}) 没开成:{li}")
             _done_treasures.add((tx, ty))
             return "missed", None
