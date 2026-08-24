@@ -577,9 +577,14 @@ def _greed_collect(cat, t, nested=False):
         return "missed", None
     if cat == "Containers":
         run_tool("interact", {"x": tx, "y": ty})
-        # /interact 只是排队,真结果在 /state 的 last_interact 里。不读就会把
-        # 陷阱箱/上锁箱当成开了,接着 loot_all 掏个空。
-        li = (mod_get("/state").get("last_interact") or "")
+        # /interact 只是排队,主线程下一帧才真开,真结果在 /state 的 last_interact 里。
+        # 【必须等它离开 pending】--- 发完就读只会读到 pending,把开成了的箱子判成没开。
+        li = "pending"
+        for _ in range(20):
+            li = (mod_get("/state").get("last_interact") or "")
+            if li != "pending":
+                break
+            time.sleep(0.1)
         if li != "opened":
             print(f"[greed]   ({tx},{ty}) 没开成:{li}")
             _done_treasures.add((tx, ty))
@@ -795,6 +800,8 @@ def run_tool(name, args):
     if name == "loot_all":
         prev_inv = _inv_snapshot()
         r = mod_post("/loot_all", {})
+        # 排队的,主线程下一帧才掏。立刻比背包会看到"什么都没拿到"
+        time.sleep(0.3)
         return with_result(r, prev_inv)
     if name == "craft":
         prev_inv = _inv_snapshot()
