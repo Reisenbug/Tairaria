@@ -1367,12 +1367,14 @@ def _run_from_zero():
     return _run_hell()
 
 
-def _run_hell():
+def _run_hell(teleport=False):
     """到地狱之后的一整套。编排全在 mod 里(StartHellRun),这边只触发+播报进度。
 
     别在这儿重推坐标:选址/算线/接力都在 mod 那一份里,python 再算一遍就是第二套判据。
+
+    teleport=True(/tb 2):先把人放到地狱再开跑,只测这一段用。落点也是 mod 算的。
     """
-    r = mod_post("/hell_run", {})
+    r = mod_post("/hell_run", {"teleport": True} if teleport else {})
     if not r.get("accepted"):
         say(f"地狱流程起不来:{r.get('reason')}", bot=True)
         return True
@@ -1800,6 +1802,16 @@ def run_goal(goal):
     # 纯代码触发的写死流程,一次 LLM 都不调 —— 在分类之前拦掉
     if goal.strip() == "1":
         _run_from_zero()
+        return
+
+    # 2 = 只测地狱那一段:直接把人放到地狱再跑,跳过砍树/盖房/下降。
+    # 传送目标由 mod 算(HellLanding),这边照旧只是触发
+    if goal.strip() == "2":
+        say("跳过前面,直接测地狱那一段。", bot=True)
+        # 跳过了备料那几步,但地狱那套照样要平台(寻路耗材)和方块(176 格桥)。
+        # 木头有 mod 那边的让步自动补,平台得自己搓
+        _top_up_platforms()
+        _run_hell(teleport=True)
         return
 
     spec = classify_find(goal)
