@@ -967,6 +967,32 @@ def _descent_h(x, y):
 _KN = {"wood_chest": "木箱", "chest": "箱子", "heart": "水晶"}
 
 
+def _warm_descent_field(bname):
+    """盖房子的几十秒里,后台把下一段导航的场建好。失败一律吞掉 —— 这只是省等待,不是必要步骤。"""
+    try:
+        r = mod_post("/descent_route", {"name": bname})
+        if not r.get("found"):
+            return
+        # _run_descend 木箱少于 2 个会放宽挖掘额度重查,重查会换掉第一站 —— 这里照走一遍,
+        # 否则预建的是会被丢弃的那条路线的目标,场白建
+        wood = sum(1 for t in (r.get("treasures") or []) if t.get("tier") and t["kind"] == "wood_chest")
+        if wood < 2:
+            r2 = mod_post("/descent_route", {"name": bname, "dig_max": 30, "dig_max2": 40})
+            if r2.get("found"):
+                w2 = sum(1 for t in (r2.get("treasures") or []) if t.get("tier") and t["kind"] == "wood_chest")
+                if w2 > wood:
+                    r = r2
+        plan = r.get("itinerary") or []
+        # 盖完房子第一个走的就是它:有宝就是第一站,没宝就直奔地狱落点
+        tgt = (plan[0]["x"], plan[0]["y"]) if plan else (r.get("hell_x"), r.get("hell_y"))
+        if tgt[0] is None or tgt[1] is None:
+            return
+        w = mod_post("/field_warm", {"gx": tgt[0], "gy": tgt[1]})
+        print(f"[warm] 盖房期间预建场 {tgt} → {w}")
+    except Exception as e:
+        print(f"[warm] 预建场跳过:{e}")
+
+
 def _run_descend(bname):
     """ITINERARY descent: walk the chain /descent_route stitched. The mod returns `itinerary` — the treasures
     already ordered into ONE line, each stop priced from the PREVIOUS STOP rather than from the main line. That
@@ -1349,6 +1375,9 @@ def _run_from_zero():
     print(f"[house] 到房址一带 {at},要脚踩 ({hx},{hy})")
 
     _top_up_platforms(RUN1_BUILD_WOOD)
+    # 【盖房前先把下一段的场建起来】。建场 1.5 秒是同步等的,而盖房要几十秒 —— 让它在这期间
+    # 后台跑完,房子一好人直接动身。路线是纯计算,不依赖房子,所以现在算和盖完再算一样
+    _warm_descent_field(bname="jungle")
     say("开始盖房子。", bot=True)
     err = _build_house(hx, hy)
     if err:
