@@ -968,29 +968,16 @@ _KN = {"wood_chest": "木箱", "chest": "箱子", "heart": "水晶"}
 
 
 def _warm_descent_field(bname):
-    """盖房子的几十秒里,后台把下一段导航的场建好。失败一律吞掉 —— 这只是省等待,不是必要步骤。"""
+    """盖房子的几十秒里,后台把下降场算好。房子盖完 /descent_route 直接命中缓存,人不用干站着等。
+
+    【只发一个异步请求就返回】。早先这里先调 /descent_route 拿第一站坐标再预建导航场 —— 而
+    /descent_route 本身就在主线程跑全图 Dijkstra,等于盖房前白卡两次,比不预热还糟。
+    """
     try:
-        r = mod_post("/descent_route", {"name": bname})
-        if not r.get("found"):
-            return
-        # _run_descend 木箱少于 2 个会放宽挖掘额度重查,重查会换掉第一站 —— 这里照走一遍,
-        # 否则预建的是会被丢弃的那条路线的目标,场白建
-        wood = sum(1 for t in (r.get("treasures") or []) if t.get("tier") and t["kind"] == "wood_chest")
-        if wood < 2:
-            r2 = mod_post("/descent_route", {"name": bname, "dig_max": 30, "dig_max2": 40})
-            if r2.get("found"):
-                w2 = sum(1 for t in (r2.get("treasures") or []) if t.get("tier") and t["kind"] == "wood_chest")
-                if w2 > wood:
-                    r = r2
-        plan = r.get("itinerary") or []
-        # 盖完房子第一个走的就是它:有宝就是第一站,没宝就直奔地狱落点
-        tgt = (plan[0]["x"], plan[0]["y"]) if plan else (r.get("hell_x"), r.get("hell_y"))
-        if tgt[0] is None or tgt[1] is None:
-            return
-        w = mod_post("/field_warm", {"gx": tgt[0], "gy": tgt[1]})
-        print(f"[warm] 盖房期间预建场 {tgt} → {w}")
+        r = mod_post("/descent_warm", {"name": bname})
+        print(f"[warm] 盖房期间后台算下降场 → {r}")
     except Exception as e:
-        print(f"[warm] 预建场跳过:{e}")
+        print(f"[warm] 预算下降场跳过:{e}")
 
 
 def _run_descend(bname):
