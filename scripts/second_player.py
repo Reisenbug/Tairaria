@@ -968,14 +968,14 @@ _KN = {"wood_chest": "木箱", "chest": "箱子", "heart": "水晶"}
 
 
 def _warm_descent_field(bname):
-    """盖房子的几十秒里,后台把下降场算好。房子盖完 /descent_route 直接命中缓存,人不用干站着等。
+    """盖房子的几十秒里,后台把整条下降路线算完。房子盖完 /descent_route 直接取结果,人不用干站着等。
 
     【只发一个异步请求就返回】。早先这里先调 /descent_route 拿第一站坐标再预建导航场 —— 而
     /descent_route 本身就在主线程跑全图 Dijkstra,等于盖房前白卡两次,比不预热还糟。
     """
     try:
-        r = mod_post("/descent_warm", {"name": bname})
-        print(f"[warm] 盖房期间后台算下降场 → {r}")
+        r = mod_post("/descent_route_async", {"name": bname})
+        print(f"[warm] 盖房期间后台算下降路线 → {r}")
     except Exception as e:
         print(f"[warm] 预算下降场跳过:{e}")
 
