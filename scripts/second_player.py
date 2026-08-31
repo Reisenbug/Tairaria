@@ -564,9 +564,20 @@ def _greed_collect(cat, t, nested=False):
     that as a pickup is how a run reported four treasures it had not necessarily taken."""
     tx, ty = t["x"], t["y"]
     say(f"顺路捡:{t.get('kind') or cat}({tx},{ty})", bot=True)
+    # 走过去这一段照旧走 nav_to:它带【顺路采集】(走一段扫一圈,贴着箱子就拐过去),
+    # 这是这条路上捡到大部分东西的原因。TreasureGrab 那边只管到了之后的开箱和掏空。
+    nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty,
+                                         # 箱子够得着就行;矿要挖,得站到位
+                                         "reach": cat == "Containers",
+                                         "greed": [] if nested else list(GREED_DEFAULT)}))
+    if nav.get("status") == "interrupted":
+        return "interrupted", nav
+    if not nav.get("done") and nav.get("status") != "done":
+        print(f"[greed]   放弃 ({tx},{ty}):nav {nav.get('status')} {nav.get('reason','')}")
+        return "missed", None
     if cat == "Containers":
-        # 【箱子整条链在 mod 里】。走过去、归一锚点、开箱、腾格子、掏空、验收箱子真空了 ——
-        # 这边只发一次再轮询。原来这套编排在这儿,靠轮询一个不带坐标的全局 last_interact,
+        # 【开箱到掏空这一段在 mod 里】。归一锚点、开箱、腾格子、掏空、验收箱子真空了 ——
+        # 这边只发一次再轮询。原来这套写在这儿,靠轮询一个不带坐标的全局 last_interact,
         # 读到的 opened 可能是上一个箱子留下的,而"拿到了"只等于"发过 loot_all"。
         st = _hwait("/collect_treasure_status", 600, start=("/collect_treasure", {"x": tx, "y": ty}))
         _done_treasures.add((tx, ty))   # 掏空的箱子不消失,地图证实不了,记下来别再开第二遍
@@ -576,16 +587,6 @@ def _greed_collect(cat, t, nested=False):
                 print(f"[greed]   ({tx},{ty}) 只掏了一部分:{st.get('reason')}")
             return "got", None
         print(f"[greed]   ({tx},{ty}) 没拿到:{oc} {st.get('reason','')}")
-        return "missed", None
-    # 矿/生命水晶要挖,得先站到位(箱子那条不走这儿 —— TreasureGrab 自己会走过去)。
-    # 只禁【第二层】嵌套,不是全禁:计划里那些站点也走这个函数,一刀切关掉的话
-    # 整段下地狱的路上一个顺路的宝都不看 —— 贴着水晶走过去都不挖。
-    nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty,
-                                         "greed": [] if nested else list(GREED_DEFAULT)}))
-    if nav.get("status") == "interrupted":
-        return "interrupted", nav
-    if not nav.get("done") and nav.get("status") != "done":
-        print(f"[greed]   放弃 ({tx},{ty}):nav {nav.get('status')} {nav.get('reason','')}")
         return "missed", None
     slot = _best_tool_slot("pick")
     res = json.loads(run_tool("use_item", {"x": tx, "y": ty, "strict": True,
