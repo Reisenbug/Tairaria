@@ -564,37 +564,29 @@ def _greed_collect(cat, t, nested=False):
     that as a pickup is how a run reported four treasures it had not necessarily taken."""
     tx, ty = t["x"], t["y"]
     say(f"顺路捡:{t.get('kind') or cat}({tx},{ty})", bot=True)
+    if cat == "Containers":
+        # 【箱子整条链在 mod 里】。走过去、归一锚点、开箱、腾格子、掏空、验收箱子真空了 ——
+        # 这边只发一次再轮询。原来这套编排在这儿,靠轮询一个不带坐标的全局 last_interact,
+        # 读到的 opened 可能是上一个箱子留下的,而"拿到了"只等于"发过 loot_all"。
+        st = _hwait("/collect_treasure_status", 600, start=("/collect_treasure", {"x": tx, "y": ty}))
+        _done_treasures.add((tx, ty))   # 掏空的箱子不消失,地图证实不了,记下来别再开第二遍
+        oc = st.get("outcome")
+        if oc in ("done", "partial"):
+            if oc == "partial":
+                print(f"[greed]   ({tx},{ty}) 只掏了一部分:{st.get('reason')}")
+            return "got", None
+        print(f"[greed]   ({tx},{ty}) 没拿到:{oc} {st.get('reason','')}")
+        return "missed", None
+    # 矿/生命水晶要挖,得先站到位(箱子那条不走这儿 —— TreasureGrab 自己会走过去)。
     # 只禁【第二层】嵌套,不是全禁:计划里那些站点也走这个函数,一刀切关掉的话
-    # 整段下地狱的路上一个顺路的宝都不看 —— 贴着箱子走过去都不开。
+    # 整段下地狱的路上一个顺路的宝都不看 —— 贴着水晶走过去都不挖。
     nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty,
-                                         # 箱子够得着就行;矿要挖,得站到位
-                                         "reach": cat == "Containers",
                                          "greed": [] if nested else list(GREED_DEFAULT)}))
     if nav.get("status") == "interrupted":
         return "interrupted", nav
     if not nav.get("done") and nav.get("status") != "done":
         print(f"[greed]   放弃 ({tx},{ty}):nav {nav.get('status')} {nav.get('reason','')}")
         return "missed", None
-    if cat == "Containers":
-        run_tool("interact", {"x": tx, "y": ty})
-        # /interact 只是排队,主线程下一帧才真开,真结果在 /state 的 last_interact 里。
-        # 【必须等它离开 pending】--- 发完就读只会读到 pending,把开成了的箱子判成没开。
-        # 字段在 equipment 底下,不在顶层 --- 读顶层永远拿到 None,于是永远判"没开成"
-        li = "pending"
-        for _ in range(20):
-            li = ((mod_get("/state").get("equipment") or {}).get("last_interact") or "")
-            if li != "pending":
-                break
-            time.sleep(0.1)
-        # already_open = 上一个箱子还开着,不是这次失败。掏完就是了
-        if li not in ("opened", "already_open"):
-            print(f"[greed]   ({tx},{ty}) 没开成:{li}")
-            _done_treasures.add((tx, ty))
-            return "missed", None
-        run_tool("loot_all", {})
-        # 掏空的箱子不消失,地图证实不了,记下来别再回来开第二遍
-        _done_treasures.add((tx, ty))
-        return "got", None
     slot = _best_tool_slot("pick")
     res = json.loads(run_tool("use_item", {"x": tx, "y": ty, "strict": True,
                                            "slot": slot if slot is not None else -1, "duration_ticks": 0}))
@@ -1231,7 +1223,16 @@ def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400, toward=0):
 # 编排全在 mod 的 HouseBuilder:这边只选址+触发+等结果,尺寸坐标顺序不在这儿重复一份
 
 
-def _hwait(path, timeout=90):
+def _hwait(path, timeout=90, start=None):
+    """轮询到 running 变 false。start=(路径, body) 时先发起再等 —— 【必须等它先转起来】,
+    否则发完立刻读,mod 那一帧还没 Tick,running 仍是 false,读到的是上一趟的结果。"""
+    if start is not None:
+        r = mod_post(start[0], start[1])
+        if not r.get("ok"):
+            return {"outcome": "failed", "reason": r.get("reason", "rejected"), "running": False}
+        spin = time.time() + 2
+        while time.time() < spin and not mod_get(path).get("running"):
+            time.sleep(0.05)
     end = time.time() + timeout
     while time.time() < end:
         st = mod_get(path)
