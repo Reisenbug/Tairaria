@@ -1314,7 +1314,8 @@ def _collect_along_route(item, need, tag):
 
 
 def _run_from_zero():
-    """/tb 1 — 写死的流程:木材 → 绳子 → 盖房 → 下地狱。全程不问 LLM。"""
+    """【已停用】/tb 1 现在走 _run_start(),编排在 mod 的 StartRun 里。
+    这份留着当参考:里面的 _gather_by / _collect_along_route 还没有 mod 对应物。"""
     say("开工:砍木头 → 找绳子 → 盖房子 → 下地狱。", bot=True)
 
     # ── 1. 木材 ──────────────────────────────────────────────────────────────
@@ -1383,6 +1384,52 @@ def _run_from_zero():
 
     # ── 5. 地狱:盖房 → 铺桥 → 召肉山 → 打 ────────────────────────────────────
     return _run_hell()
+
+
+def _run_start():
+    """/tb 1 — 全流程编排搬进 mod 了(StartRun),这边只触发+播报进度。
+
+    以前这一整套写在 _run_from_zero 里,每一步都要 HTTP 往返 —— 发布时想把 python
+    切掉就得连流程一起丢。现在 mod 里 /start 就能跑完,python 这条只是另一个入口。
+    """
+    r = mod_post("/start_run", {})
+    if not r.get("accepted"):
+        say(f"起不来:{r.get('reason')}", bot=True)
+        return True
+    say("开工:收火把 → 盖房子 → 下地狱。", bot=True)
+    seen, last = None, time.time()
+    end = time.time() + 60 * 90
+    while time.time() < end:
+        st = mod_get("/start_run_status")
+        if st.get("start_error"):
+            say(f"起不来:{st['start_error']}", bot=True)
+            return True
+        ph = st.get("phase", "Idle")
+        if ph != seen:
+            seen, last = ph, time.time()
+            print(f"[start] {ph}")
+            say(_START_SAY.get(ph, f"进行中:{ph}"), bot=True)
+        if not st.get("running"):
+            if st.get("outcome") == "stuck":
+                say(f"停了:{st.get('reason')}", bot=True)
+            break
+        if time.time() - last > 60 * 20:
+            say(f"卡在 {ph} 二十分钟了,停手。", bot=True)
+            mod_post("/start_run_stop", {})
+            return True
+        time.sleep(1.0)
+    return True
+
+
+_START_SAY = {
+    "Torch": "顺着下丛林的路开箱子收火把。",
+    "Site": "找地方盖房子。",
+    "GotoSite": "往房址走。",
+    "House": "开始盖房子。",
+    "Descend": "下地狱。",
+    "Hell": "到地狱了:盖房 → 铺桥 → 召肉山。",
+    "Done": "全流程跑完。",
+}
 
 
 def _run_hell(teleport=False):
@@ -1819,7 +1866,7 @@ def run_goal(goal):
 
     # 纯代码触发的写死流程,一次 LLM 都不调 —— 在分类之前拦掉
     if goal.strip() == "1":
-        _run_from_zero()
+        _run_start()
         return
 
     # 2 = 只测地狱那一段:直接把人放到地狱再跑,跳过砍树/盖房/下降。
