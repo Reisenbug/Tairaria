@@ -960,19 +960,6 @@ def _descent_h(x, y):
 _KN = {"wood_chest": "木箱", "chest": "箱子", "heart": "水晶"}
 
 
-def _warm_descent_field(bname):
-    """盖房子的几十秒里,后台把整条下降路线算完。房子盖完 /descent_route 直接取结果,人不用干站着等。
-
-    【只发一个异步请求就返回】。早先这里先调 /descent_route 拿第一站坐标再预建导航场 —— 而
-    /descent_route 本身就在主线程跑全图 Dijkstra,等于盖房前白卡两次,比不预热还糟。
-    """
-    try:
-        r = mod_post("/descent_route_async", {"name": bname})
-        print(f"[warm] 盖房期间后台算下降路线 → {r}")
-    except Exception as e:
-        print(f"[warm] 预算下降场跳过:{e}")
-
-
 def _run_descend(bname):
     """ITINERARY descent: walk the chain /descent_route stitched. The mod returns `itinerary` — the treasures
     already ordered into ONE line, each stop priced from the PREVIOUS STOP rather than from the main line. That
@@ -1078,150 +1065,15 @@ def _run_descend(bname):
         say(f"到地狱了,途中{body}{tail}。", bot=True)
     else:
         say(f"下降中断({st}),已{body}{tail}。", bot=True)
-    _run_descend.arrived = arrived      # 到没到,给 /tb 1 接着判断要不要开地狱那套
+    _run_descend.arrived = arrived      # 到没到,给调用方判断要不要接着开地狱那套
     return True
 
 
-# ============================ /tb 1 = 从零到地狱(纯代码,不调 LLM)============================
-
-RUN1_BUILD_WOOD = 125      # 建房
-HOUSE_DIR = 1              # 房子从左下角往哪边延伸,必须和 /build_house 的 dir 一致
-RUN1_ROAD_WOOD = 75        # 赶路的平台,1木材出2个
 PLAT_LOW, PLAT_HIGH = 50, 150      # 平台少于50就补到150
-RUN1_NEED = {"木材": RUN1_BUILD_WOOD + RUN1_ROAD_WOOD, "绳": 20, "火把": 4}
 
 
 def _have(name):
     return _inv_snapshot().get(name, 0)
-
-
-# 原版拾取范围 defaultItemGrabRange=42px ≈ 2.6格(从碰撞箱外扩)。掉在 3 格外就永远吸不到,
-# 干等只会站着不动 —— 所以要走过去捡。
-GRAB_CELLS = 2
-
-
-def _wait_pickup(max_s=12):
-    """等掉落物进包;够不到的主动走过去捡。"""
-    t0 = time.monotonic()
-    empty_since = None
-    while time.monotonic() - t0 < max_s:
-        st = mod_get("/state")
-        drops = st.get("dropped_items") or []
-        if not drops:
-            if empty_since is None:
-                empty_since = time.monotonic()      # 砍完那一瞬掉落物还没生成,先等半秒再确认
-            elif time.monotonic() - empty_since >= 0.6:
-                return True
-            time.sleep(0.3)
-            continue
-        empty_since = None
-        me = _slim(st)["pos"]
-        far = []
-        for it in drops:
-            ip = it.get("pos") or {}
-            ix, iy = round(ip.get("x", 0) / 16), round(ip.get("y", 0) / 16)
-            if abs(ix - me["x"]) + abs(iy - me["y"]) > GRAB_CELLS:
-                far.append((abs(ix - me["x"]) + abs(iy - me["y"]), ix, iy))
-        if not far:
-            time.sleep(0.3)                          # 都在吸取范围里,等它飞进来
-            continue
-        far.sort()
-        _, tx, ty = far[0]
-        print(f"[pickup] 走去捡 ({tx},{ty}),还剩{len(drops)}件")
-        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty, "greed": []}))   # 正在捡东西,别中途再拐
-        if nav.get("status") == "interrupted":
-            return False
-    return False
-
-
-# 砍倒一棵树的时间基本固定(一下整棵倒),和树高无关 —— 高树就是白赚
-CHOP_FRAMES = 60
-WALK_FRAMES_PER_TILE = 4.0     # 走一格约几帧,用来把距离折成时间
-WOOD_PER_TRUNK = 1.6           # 一格树干约出几个木头,把高度折成收益帧数
-TOWARD_BONUS = 25              # 顺路(朝丛林方向)的小让利,防止贪心来回横跳
-MIN_TRUNK_H = 6                # 矮于这个的一律不砍:h=1 是枝叶,h≤5 是树苗,砍它跟砍大树一样费时间
-
-
-def _tallest_trunks(tiles, skip, px=None, toward=0):
-    """按 cost−bonus 排:cost = 砍的固定耗时 + 走过去的时间,bonus = 树高折成的木头。
-    只按高度排会为了远处一棵大树跑穿半张图;只按距离排又会一直啃小树苗。
-    toward=+1/-1 且给了玩家列 px 时,那个方向的树再让一点,免得每轮最优点左右横跳。"""
-    col = {}
-    for t in tiles:
-        col.setdefault(t["x"], []).append((t["y"], t["dist"]))
-    runs = []
-    for x, ys in col.items():
-        ys.sort()
-        s = 0
-        for i in range(1, len(ys) + 1):
-            if i == len(ys) or ys[i][0] != ys[i - 1][0] + 1:
-                seg = ys[s:i]
-                base = seg[-1][0]                     # 树干底部,砍这里
-                h = len(seg)
-                if h >= MIN_TRUNK_H and (x, base) not in skip:
-                    dist = min(d for _, d in seg)
-                    score = (CHOP_FRAMES + dist * WALK_FRAMES_PER_TILE
-                             - h * WOOD_PER_TRUNK * CHOP_FRAMES / 10.0)
-                    if toward and px is not None and (x - px) * toward > 0:
-                        score -= TOWARD_BONUS
-                    runs.append((score, x, base))
-                s = i
-    runs.sort()                                        # 净成本升序,最划算的在前
-    return [(x, y) for _, x, y in runs]
-
-
-def _gather_by(what, act, need_name, need_n, rounds=40, max_dist=400, toward=0):
-    """找最近的 what → 走过去 → 对它做 act,直到 need_name 够 need_n。
-    True=够了 / False=没得找了 / None=被打断。"""
-    skip = set()
-    acted = 0
-    for _ in range(rounds):
-        have = _have(need_name)
-        if have >= need_n:
-            return True
-        # 砍树要 400 格:find_tiles 按距离截断,脚边一片树苗就能占满配额,远处的大树根本进不了候选
-        n = 400 if act == "chop" else 20
-        r = mod_post("/find_tiles", {"name": what, "n": n, "max_dist": max_dist})
-        tiles = [t for t in (r.get("tiles") or []) if (t["x"], t["y"]) not in skip]
-        if not tiles:
-            return False
-        if act == "chop":
-            px = _slim(mod_get("/state"))["pos"]["x"] if toward else None
-            trunks = _tallest_trunks(tiles, skip, px=px, toward=toward)
-            if not trunks:
-                print(f"[run1] 附近 {max_dist} 格内没有 h>={MIN_TRUNK_H} 的树")
-                return False
-            tx, ty = trunks[0]
-        else:
-            tx, ty = tiles[0]["x"], tiles[0]["y"]
-        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty}))
-        if nav.get("status") in ("walled_in", "loop_unresolved", "timeout", "failed"):
-            skip.add((tx, ty))
-            continue
-        if nav.get("status") == "interrupted":
-            return None
-        if act == "open":
-            run_tool("interact", {"x": tx, "y": ty})
-            run_tool("loot_all", {})
-        else:
-            slot = _best_tool_slot(_ACT_TOOL.get(act, "pick"))
-            res = json.loads(run_tool("use_item", {"x": tx, "y": ty, "strict": act == "smash",
-                                                   "slot": slot if slot is not None else -1,
-                                                   "duration_ticks": 0}))
-            if res.get("outcome") != "removed":
-                skip.add((tx, ty))
-        if act == "chop":
-            _wait_pickup()
-        got = _have(need_name)
-        print(f"[run1] {act} ({tx},{ty}) → {need_name}={got}/{need_n}")
-        acted += 1
-        if got >= need_n:      # 够了就立刻撒手,别再走去下一棵
-            return True
-    return _have(need_name) >= need_n
-
-
-# ── 盖房子 ─────────────────────────────────────────────────────────────────────
-# 编排全在 mod 的 HouseBuilder:这边只选址+触发+等结果,尺寸坐标顺序不在这儿重复一份
 
 
 def _hwait(path, timeout=90, start=None):
@@ -1243,23 +1095,6 @@ def _hwait(path, timeout=90, start=None):
     return mod_get(path)
 
 
-def _build_house(ax, ay):
-    """在 (ax,ay)=房子矩形左下角 盖 4 间房。编排整个在 mod 里(HouseBuilder)。
-    失败返回错误字符串,成功返回 None。
-
-    以前这一整套编排写在这里,而单间那套在 mod 里 —— 同一份坐标推了两遍,
-    于是同一个 off-by-one 反复出现(柱子歪一格、屋顶铺半空)。现在只有 mod 那一份。
-    """
-    r = mod_post("/build_house", {"rooms": 4, "dir": HOUSE_DIR, "x": ax, "y": ay})
-    if not r.get("accepted"):
-        return f"盖房被拒:{r.get('reason')}"
-    st = _hwait("/build_house_status", 600)
-    print(f"[house] {st}")
-    if st.get("outcome") != "done":
-        return f"{st.get('reason') or st.get('outcome')}(卡在 {st.get('phase')})"
-    return None
-
-
 def _top_up_platforms(reserve=0):
     """平台少于 PLAT_LOW 就补到 PLAT_HIGH。amount 是合成次数,1次吃1木材出2平台。
     平台是寻路的耗材,一路铺一路少,所以每段路之前都要补,不能只在开局搓一次。
@@ -1279,157 +1114,6 @@ def _top_up_platforms(reserve=0):
     if r.get("free_slots") == 0:
         say("背包满了,合不了平台。", bot=True)
     return now
-
-
-def _collect_along_route(item, need, tag):
-    """沿 descent_route 的宝藏链走,东西够了就停(不走完全程)。
-    None=被打断 / True=够了 / False=走完了还不够。"""
-    if _have(item) >= need:
-        return True
-    r = mod_post("/descent_route", {"name": "jungle"})
-    if not r.get("found"):
-        say("没找到下地狱的主道。", bot=True)
-        return False
-    plan = r.get("itinerary") or []
-    kinds = {}
-    for t in plan:
-        kinds[t["kind"]] = kinds.get(t["kind"], 0) + 1
-    print(f"[{tag}] 路上: " + (", ".join(f"{_KN.get(k,k)}×{v}" for k, v in sorted(kinds.items())) or "啥也没有"))
-    for i, t in enumerate(plan):
-        if _have(item) >= need:
-            say(f"{item}够了({_have(item)}),收手。", bot=True)
-            return True
-        if t["kind"] == "heart":
-            continue                      # 这趟只为补货,血量另说
-        if _looted(t):
-            print(f"[{tag}] [{i+1}/{len(plan)}] ({t['x']},{t['y']}) 开过了,跳过")
-            continue
-        print(f"[{tag}] [{i+1}/{len(plan)}] {t['kind']} ({t['x']},{t['y']})")
-        outcome, intr = _greed_collect("Containers", t)
-        if outcome == "interrupted":
-            say("(被打断,停下待命)", bot=True)
-            return None
-        print(f"[{tag}]   {outcome} → {item}{_have(item)}/{need}")
-    return _have(item) >= need
-
-
-def _run_from_zero():
-    """【已停用】/tb 1 现在走 _run_start(),编排在 mod 的 StartRun 里。
-    这份留着当参考:里面的 _gather_by / _collect_along_route 还没有 mod 对应物。"""
-    say("开工:砍木头 → 找绳子 → 盖房子 → 下地狱。", bot=True)
-
-    # ── 1. 木材 ──────────────────────────────────────────────────────────────
-    if _have("木材") < RUN1_NEED["木材"]:
-        say(f"先砍树,要{RUN1_NEED['木材']}木材。", bot=True)
-        # 顺着丛林方向砍:等量的木头,砍完顺带也走近了 —— 也压住贪心每轮左右横跳
-        jd = 0
-        jb = mod_post("/find_biome", {"name": "jungle"})
-        if jb.get("found"):
-            here = _slim(mod_get("/state"))["pos"]["x"]
-            jd = 1 if jb["x"] > here else -1
-            print(f"[run1] 丛林在 x={jb['x']}(我 {here}),砍树偏向 {'东' if jd > 0 else '西'}")
-        ok = _gather_by("Trees", "chop", "木材", RUN1_NEED["木材"], toward=jd)
-        if ok is None:
-            return True
-        if not ok:
-            say(f"附近树砍完了,木材只有{_have('木材')}。", bot=True)
-    _top_up_platforms(RUN1_BUILD_WOOD)
-    say(f"木材{_have('木材')}、平台{_have('木平台')}。", bot=True)
-
-    # ── 2. 火把 ──────────────────────────────────────────────────────────────
-    # 火把合不出来(要凝胶,这世界不刷怪),只能开箱砸罐;顺下丛林的路收,够了就回头盖房
-    need_torch = RUN1_NEED["火把"]
-    if _have("火把") < need_torch:
-        say(f"火把不够({_have('火把')}/{need_torch}),顺着下丛林的路开箱子。", bot=True)
-        got = _collect_along_route("火把", need_torch, "torch")
-        if got is None:
-            return True
-        if not got:
-            say(f"路上的箱子开完了,火把只有{_have('火把')}/{need_torch},没光 NPC 不住,盖不了。", bot=True)
-            return True
-
-    # ── 3. 地表盖房 ──────────────────────────────────────────────────────────
-    # 房子就是一个 21×10 的矩形,at 是左下角。选址只问一件事:这个框里空不空。
-    sf = mod_post("/scan_house", {"w": 21, "h": 10, "range": 200})
-    if not sf.get("found"):
-        say(f"附近没地方盖(要 21×10 的净空;扫了{sf.get('scanned')}格)。", bot=True)
-        return True
-    hx, hy = sf["at"]
-    # 走到房址那一带就行,精准踩上左下角是 mod 里 Ph.Lift 的事(垫平台/掉下来/对齐都在那边)。
-    # 这里不再拦"站位对不对" —— 站位不对不是失败,是还没到。
-    say(f"房址 ({hx},{hy}) 左下角,走过去。", bot=True)
-    nav = json.loads(run_tool("nav_to", {"x": hx, "y": hy}))
-    if nav.get("status") == "interrupted":
-        return True
-    at = _slim(mod_get("/state"))["pos"]
-    print(f"[house] 到房址一带 {at},要脚踩 ({hx},{hy})")
-
-    _top_up_platforms(RUN1_BUILD_WOOD)
-    # 【盖房前先把下一段的场建起来】。建场 1.5 秒是同步等的,而盖房要几十秒 —— 让它在这期间
-    # 后台跑完,房子一好人直接动身。路线是纯计算,不依赖房子,所以现在算和盖完再算一样
-    _warm_descent_field(bname="jungle")
-    say("开始盖房子。", bot=True)
-    err = _build_house(hx, hy)
-    if err:
-        say(f"房子没盖成:{err}", bot=True)
-        return True
-    say("房子盖好了。", bot=True)
-
-    # ── 4. 下地狱 ────────────────────────────────────────────────────────────
-    _top_up_platforms()
-    say("下地狱。", bot=True)
-    _run_descend("jungle")
-    if not _run_descend.arrived:
-        return True                     # 没到地狱就别往下走 —— 地狱那套是从"人在地狱"起算的
-
-    # ── 5. 地狱:盖房 → 铺桥 → 召肉山 → 打 ────────────────────────────────────
-    return _run_hell()
-
-
-def _run_start():
-    """/tb 1 — 全流程编排搬进 mod 了(StartRun),这边只触发+播报进度。
-
-    以前这一整套写在 _run_from_zero 里,每一步都要 HTTP 往返 —— 发布时想把 python
-    切掉就得连流程一起丢。现在 mod 里 /start 就能跑完,python 这条只是另一个入口。
-    """
-    r = mod_post("/start_run", {})
-    if not r.get("accepted"):
-        say(f"起不来:{r.get('reason')}", bot=True)
-        return True
-    say("开工:收火把 → 盖房子 → 下地狱。", bot=True)
-    seen, last = None, time.time()
-    end = time.time() + 60 * 90
-    while time.time() < end:
-        st = mod_get("/start_run_status")
-        if st.get("start_error"):
-            say(f"起不来:{st['start_error']}", bot=True)
-            return True
-        ph = st.get("phase", "Idle")
-        if ph != seen:
-            seen, last = ph, time.time()
-            print(f"[start] {ph}")
-            say(_START_SAY.get(ph, f"进行中:{ph}"), bot=True)
-        if not st.get("running"):
-            if st.get("outcome") == "stuck":
-                say(f"停了:{st.get('reason')}", bot=True)
-            break
-        if time.time() - last > 60 * 20:
-            say(f"卡在 {ph} 二十分钟了,停手。", bot=True)
-            mod_post("/start_run_stop", {})
-            return True
-        time.sleep(1.0)
-    return True
-
-
-_START_SAY = {
-    "Torch": "顺着下丛林的路开箱子收火把。",
-    "Site": "找地方盖房子。",
-    "GotoSite": "往房址走。",
-    "House": "开始盖房子。",
-    "Descend": "下地狱。",
-    "Hell": "到地狱了:盖房 → 铺桥 → 召肉山。",
-    "Done": "全流程跑完。",
-}
 
 
 def _run_hell(teleport=False):
@@ -1863,11 +1547,6 @@ def run_goal(goal):
     variable table and code runs the fixed skeleton — no hallucinated ops. FALLBACK: 甲方案 free planning for
     everything else. Understanding intent is the BRAIN's job; code only guarantees execution after routing."""
     drain_stale_instructions()
-
-    # 纯代码触发的写死流程,一次 LLM 都不调 —— 在分类之前拦掉
-    if goal.strip() == "1":
-        _run_start()
-        return
 
     # 2 = 只测地狱那一段:直接把人放到地狱再跑,跳过砍树/盖房/下降。
     # 传送目标由 mod 算(HellLanding),这边照旧只是触发
