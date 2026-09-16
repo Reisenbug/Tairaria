@@ -1,0 +1,212 @@
+"""快判层:把"判断"这个动作变得不用省着用。
+
+大模型一次调用 6 秒 + 烧 RPM 配额,所以循环里不许有脑子,只能写死 if-else。
+System One 模型(TypeSafe 的 Jev)70-500ms、输出免费,循环里第一次可以有判断。
+
+这一层的存在理由是【后端可换】:业务代码只认 ask(),不认识 typesafe 这个名字。
+Jev 没到手/没 key/挂了,自动退回 fallback(现在的大模型或硬编码),调用方不感知。
+
+用法:
+    from fastjudge import ask, Choice, Score, Noul
+    r = ask("goal_clarity", goal_text)
+    if r["intent"].confidence < CONF_ACT: ...
+"""
+import json
+import os
+import time
+
+# ---- 后端 ----------------------------------------------------------------
+# 装了 SDK 且有 key 才算可用。两者缺一就整层降级,不抛异常打断游戏。
+try:
+    from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
+    _SDK = True
+except ImportError:                     # 还没轮到 waitlist,或没装
+    _SDK = False
+
+    class _Q:                           # 占位:让 QUESTIONS 表照样能写、能被 fallback 读
+        def __init__(self, instructions, criteria=None):
+            self.instructions = instructions
+            self.criteria = criteria
+
+    class Choice(_Q): kind = "choice"
+    class Score(_Q): kind = "score"
+    class Noul(_Q): kind = "noul"
+
+
+API_KEY = os.environ.get("TYPESAFE_API_KEY", "")
+ENABLED = bool(_SDK and API_KEY)
+_client = TypeSafeClient() if ENABLED else None
+
+# 判据阈值。抄官方 confidence-gated routing 的档位,按代价分级:
+# 低于 ACT 就是真不确定 -- 别动,问玩家;高代价动作(挖一趟矿、拆地形)要到 SURE 才自动干。
+CONF_ACT = 0.6          # 低于此:不行动,升级给大模型或问玩家
+CONF_SURE = 0.85        # 高代价动作要过这条线才自动执行
+NOUL_YES = 0.7          # Noul 返回的是概率不是 bool,自己定在哪儿算"是"
+
+JUDGE_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fastjudge.jsonl")
+
+
+# ---- 问题表 --------------------------------------------------------------
+# 一次调用里的问题【并行求值,多问不加延迟】(官方 speculative fan-out)。
+# 所以按【调用时机】分组,不按用途分:该时机可能用到的全塞进去,用不上的让代码丢掉。
+QUESTIONS = {
+
+    # L3 触发器 -- 这一层唯一的【质变】。
+    # 生成模型的训练目标就是补全,你没法求它承认自己不知道;校准过的置信度把"我不知道"变成一个数。
+    # 注意 Noul 不带 confidence(概率本身就是信号),所以缺口判断必须用 Choice/Score。
+    "goal_clarity": {
+        "intent": Choice(
+            instructions="玩家这条指令想让 AI 队友做什么",
+            criteria={
+                "gather": "采集/攒够某种材料(挖矿、砍树)",
+                "craft": "合成物品或装备",
+                "build": "用背包里的材料放置/建造",
+                "goto": "去某个地方",
+                "fight": "战斗或打 boss",
+                "chat": "闲聊、问问题,不要求动作",
+            },
+        ),
+        # 下面三个是缺口。Score 而非 Noul:要 confidence 参与门控
+        "quantity_clear": Score(
+            instructions="要做多少这件事,指令里说清楚了吗",
+            criteria=["完全没提数量", "能从目标倒推出数量", "明确给了数字"],
+        ),
+        "target_clear": Score(
+            instructions="对哪个目标做,指令里说清楚了吗",
+            criteria=["没说做什么材质/哪一个", "上下文能推断", "点名了具体目标"],
+        ),
+        "is_interrupt": Noul(
+            instructions="这句话是在打断当前任务,而不是在下新任务或闲聊",
+        ),
+    },
+
+    # 动作前置校验。拦一次省一趟 mod 往返 + 一轮大模型重试(约 6-7 秒)
+    "action_sanity": {
+        "will_work": Score(
+            instructions="按当前状态,这个动作现在能成功吗",
+            criteria=["肯定失败(缺物品/缺工具/位置不对)", "不好说", "条件都满足"],
+        ),
+        "blocker": Choice(
+            instructions="如果做不成,最主要的原因是什么",
+            criteria={
+                "none": "没问题,能做",
+                "no_item": "背包里没有要用的东西",
+                "no_tool": "缺合适的工具(镐/斧)",
+                "too_far": "目标太远,够不着",
+                "bad_spot": "那个位置放不下/站不住",
+                "unknown": "说不清",
+            },
+        ),
+    },
+
+    # compact_for_send 的逐条取舍。现在是位置启发式("旧的=没用的"),
+    # 会把 track 立的台账和 mine_vein 的累计数误杀 -- 那些恰恰越旧越要留。
+    "result_keep": {
+        "worth": Score(
+            instructions="这条工具返回对接下来完成目标还有没有用",
+            criteria=["过期快照,丢掉不影响", "留个摘要就够", "必须原样留着(台账/累计数/坐标)"],
+        ),
+    },
+
+    # 玩法1:循环里的判断。run_find_template / _mine_vein 之所以只能干写死的事,
+    # 就是因为每轮问一次大模型不可能。
+    "loop_step": {
+        "done": Score(
+            instructions="这个子目标已经完成了吗",
+            criteria=["还差得远", "快了但没到", "已经达成"],
+        ),
+        "stuck": Noul(
+            instructions="角色卡住了,再这样重复下去不会有进展",
+        ),
+        "next": Choice(
+            instructions="下一步最该做什么",
+            criteria={
+                "continue": "接着做当前动作",
+                "move": "先换个位置",
+                "clear": "先挖掉挡路的东西",
+                "retarget": "换一个目标",
+                "escalate": "自己处理不了,交给大模型",
+            },
+        ),
+    },
+}
+
+
+def _fallback(name, state, why):
+    """后端不可用时的返回。全部标 confidence=0 -- 低于 CONF_ACT,
+    调用方的门控自然会走"别自作主张"那条路,不用到处写 if ENABLED。"""
+    return {"_ok": False, "_why": why,
+            **{q: _Answer(None, 0.0) for q in QUESTIONS.get(name, {})}}
+
+
+class _Answer:
+    """统一 Choice/Score/Noul 三种答案的读法,省得调用方分别记 .choice/.score/.noul。"""
+    __slots__ = ("value", "confidence", "raw")
+
+    def __init__(self, value, confidence, raw=None):
+        self.value = value
+        self.confidence = confidence
+        self.raw = raw
+
+    def __repr__(self):
+        return f"<{self.value} c={self.confidence:.2f}>"
+
+
+def _unwrap(a):
+    v = getattr(a, "choice", None)
+    if v is None:
+        v = getattr(a, "score", None)
+    if v is None:
+        v = getattr(a, "noul", None)
+    # Noul 只给概率不给 confidence:概率本身就是信号,离 0.5 越远越确定
+    c = getattr(a, "confidence", None)
+    if c is None:
+        c = abs((v if isinstance(v, float) else 0.5) - 0.5) * 2
+    return _Answer(v, c, a)
+
+
+def ask(name, state, timeout=None):
+    """问一组判断。name 是 QUESTIONS 里的组名,state 可以是 str/dict/list。
+
+    官方建议用 dict:字段名模型看得见,是重要上下文。
+    返回 {问题名: _Answer}。后端不可用时全部 confidence=0,不抛异常。"""
+    qs = QUESTIONS.get(name)
+    if qs is None:
+        raise KeyError(f"没有这组判断:{name}")
+    if not ENABLED:
+        return _fallback(name, state, "no_sdk" if not _SDK else "no_key")
+
+    t0 = time.monotonic()
+    try:
+        kw = {"timeout": timeout} if timeout else {}
+        resp = _client.system_one(state=state, questions=qs, **kw)
+        out = {k: _unwrap(v) for k, v in resp.answers.items()}
+        out["_ok"] = True
+        _log(name, state, out, time.monotonic() - t0)
+        return out
+    except Exception as e:
+        # 判断层挂了不该让游戏停。退回去,调用方按低置信度处理
+        print(f"[fastjudge] {name} 失败,降级:{type(e).__name__} {e}")
+        return _fallback(name, state, type(e).__name__)
+
+
+def _log(name, state, out, dt):
+    """每次调用记一行。Jev 到手后要验它的置信度是不是真校准的 --
+    ground truth 得现在开始攒,不然到时候没有对照数据。"""
+    try:
+        row = {"t": time.time(), "name": name, "dt": round(dt, 3),
+               "state": str(state)[:500],
+               "ans": {k: [v.value, round(v.confidence, 3)]
+                       for k, v in out.items() if isinstance(v, _Answer)}}
+        with open(JUDGE_LOG, "a") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    print(f"fastjudge: sdk={_SDK} key={'有' if API_KEY else '无'} enabled={ENABLED}")
+    for n, qs in QUESTIONS.items():
+        print(f"  {n}: {', '.join(qs)}")
+    r = ask("goal_clarity", "帮我弄点铁")
+    print(f"  试调用 -> {r}")
