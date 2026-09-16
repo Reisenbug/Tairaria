@@ -64,6 +64,8 @@ QUESTIONS = {
                 "goto": "去某个地方",
                 "fight": "战斗或打 boss",
                 "chat": "闲聊、问问题,不要求动作",
+                # 【必须留】没有兜底选项,不着边际的话会被硬塞进最近的那一类
+                "other": "以上都不是,或看不出想干什么",
             },
         ),
         # 下面三个是缺口。Score 而非 Noul:要 confidence 参与门控
@@ -133,14 +135,19 @@ QUESTIONS = {
 
 
 def _fallback(name, state, why):
-    """后端不可用时的返回。全部标 confidence=0 -- 低于 CONF_ACT,
-    调用方的门控自然会走"别自作主张"那条路,不用到处写 if ENABLED。"""
-    return {"_ok": False, "_why": why,
-            **{q: _Answer(None, 0.0) for q in QUESTIONS.get(name, {})}}
+    """后端不可用时的返回。Choice/Score 标 confidence=0 -- 低于 CONF_ACT,
+    调用方的门控自然走"别自作主张"那条路,不用到处写 if ENABLED。
+    Noul 照样给 None:它本来就没有 confidence,这里造一个假的会让调用方走错门。"""
+    out = {"_ok": False, "_why": why}
+    for q, spec in QUESTIONS.get(name, {}).items():
+        out[q] = _Answer(None, None if isinstance(spec, Noul) else 0.0)
+    return out
 
 
 class _Answer:
-    """统一 Choice/Score/Noul 三种答案的读法,省得调用方分别记 .choice/.score/.noul。"""
+    """统一 Choice/Score/Noul 三种答案的读法,省得调用方分别记 .choice/.score/.noul。
+
+    confidence=None 是 Noul:它没有这个量。要判是不是,拿 .value 和 NOUL_YES 比。"""
     __slots__ = ("value", "confidence", "raw")
 
     def __init__(self, value, confidence, raw=None):
@@ -148,8 +155,19 @@ class _Answer:
         self.confidence = confidence
         self.raw = raw
 
+    def sure(self, bar=CONF_ACT):
+        """够不够确信到可以照着动。Noul 没有 confidence,一律 False -- 走 .value 那条路。"""
+        return self.confidence is not None and self.confidence >= bar
+
+    def spread(self):
+        """概率分布,没有就是空。低 confidence 有两种:几个选项【都行】(摊开但无所谓),
+        和几种解释【互斥】(摊开才是真缺口)。只看 confidence 这一个标量分不出来,
+        要看形状 -- 所以原样透出去。"""
+        return getattr(self.raw, "probabilities", None) or {}
+
     def __repr__(self):
-        return f"<{self.value} c={self.confidence:.2f}>"
+        c = "n/a" if self.confidence is None else f"{self.confidence:.2f}"
+        return f"<{self.value} c={c}>"
 
 
 def _unwrap(a):
@@ -158,11 +176,10 @@ def _unwrap(a):
         v = getattr(a, "score", None)
     if v is None:
         v = getattr(a, "noul", None)
-    # Noul 只给概率不给 confidence:概率本身就是信号,离 0.5 越远越确定
-    c = getattr(a, "confidence", None)
-    if c is None:
-        c = abs((v if isinstance(v, float) else 0.5) - 0.5) * 2
-    return _Answer(v, c, a)
+    # Noul 【没有】confidence,概率本身就是答案。0.5 的意思是"是和否各一半",
+    # 不是"中等程度" -- 所以不许把 |p-0.5| 当确信度去和 CONF_* 比。
+    # 这里给 None,逼调用方拿 .value 和 NOUL_YES 比,别走错门。
+    return _Answer(v, getattr(a, "confidence", None), a)
 
 
 def ask(name, state, timeout=None):
