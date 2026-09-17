@@ -278,6 +278,27 @@ def ask(name, state, timeout=None):
         return _fallback(name, state, type(e).__name__)
 
 
+def ask_many(state, questions, tag="adhoc", timeout=None):
+    """问一组【动态拼出来】的判断。ask() 只认 QUESTIONS 表里的固定组名,
+    而"给这份计划的每一步各问一次"要的问题集是运行时才知道的。
+
+    一次请求一份 state、任意多个问题,官方说独立问题并行求值不加延迟 --
+    6 步串行问要 6x260ms,打包成一个请求还是 260ms。"""
+    if not ENABLED or not questions:
+        return {q: _Answer(None, 0.0) for q in questions}
+    t0 = time.monotonic()
+    try:
+        kw = {"timeout": timeout} if timeout else {}
+        resp = _client.system_one(state=state, questions=questions, **kw)
+        out = {k: _unwrap(v) for k, v in resp.answers.items()}
+        out["_ok"] = True
+        _log(tag, state, out, time.monotonic() - t0)
+        return out
+    except Exception as e:
+        print(f"[fastjudge] {tag} 失败,降级:{type(e).__name__} {e}")
+        return {q: _Answer(None, 0.0) for q in questions}
+
+
 def _log(name, state, out, dt):
     """每次调用记一行。Jev 到手后要验它的置信度是不是真校准的 --
     ground truth 得现在开始攒,不然到时候没有对照数据。"""

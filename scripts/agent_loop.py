@@ -61,24 +61,91 @@ def _facts(sp, goal, plan, idx, last_result, results):
 _READ_ONLY = {"recipe", "find", "find_biome", "probe", "measure", "say", "ask"}
 
 
+_BLOCKERS = {
+    "none": "没问题,能做",
+    "no_item": "背包里没有这一步要用的东西",
+    "no_tool": "缺合适的工具(镐/斧)",
+    "too_far": "目标太远,够不着",
+    "bad_spot": "那个位置放不下/站不住/挥不到",
+    "unknown": "说不清",
+}
+
+
+def _precheck_all(sp, goal, plan, results):
+    """【一次问完整份计划的预检】。一步一问是 6x260ms 串行等待,而官方说独立问题
+    并行求值不加延迟 -- 打包成一个请求还是 260ms。
+
+    返回 {步号: blocker字符串}。只读步不问,拿不到答案的步不拦(留空)。"""
+    todo = [i for i, op in enumerate(plan)
+            if op.get("op") not in _READ_ONLY and i < MAX_STEPS]
+    if not todo:
+        return {}
+
+    state = {"goal": goal, "steps": {}}
+    try:
+        st = sp.mod_get("/state")
+        p = st.get("player", {})
+        pos = p.get("pos", {})
+        state["hp"] = p.get("hp")
+        state["player_cell"] = [round(pos.get("x", 0) / 16), round(pos.get("y", 0) / 16)]
+        state["inventory"] = [it.get("name") for it in
+                              (st.get("equipment", {}).get("items", []) or [])][:20]
+    except Exception:
+        pass
+
+    for i in todo:
+        op = plan[i]
+        d = {"op": op.get("op")}
+        for k in ("name", "what", "tool", "slot", "at", "to"):
+            if op.get(k) is not None:
+                d[k] = op[k]
+        state["steps"][f"step_{i}"] = d
+
+    # 【坐标此刻多半还没解析】。计划里是 $t.pos 这种占位符,find 执行到才有值 --
+    # 所以这一趟只拦"缺物品/缺工具"这类和位置无关的,位置问题留给执行时那次现场预检
+    qs = {f"step_{i}": fastjudge.Choice(
+        instructions=f"这份计划的 step_{i} 现在做得成吗?做不成的话最主要的障碍是什么?"
+                     f"坐标写成 $xx.pos 的说明执行到那步才知道,别因为这个判 too_far。",
+        criteria=_BLOCKERS) for i in todo}
+
+    ans = fastjudge.ask_many(state, qs, tag="precheck_batch")
+    out = {}
+    for i in todo:
+        a = ans.get(f"step_{i}")
+        if a and a.value not in (None, "none", "unknown") and a.sure():
+            out[i] = a.value
+    if out:
+        print(f"[fastjudge] 批量预检 {len(todo)}步一次问完,拦下 {out}")
+    else:
+        print(f"[fastjudge] 批量预检 {len(todo)}步一次问完,都能做")
+    return out
+
+
 def _run_plan(goal, sp, plan, results):
     """走完一份计划。返回 (走到第几步, 最后一个结果, 是不是中途卡死了)。
     这里【只管执行】,"目标到底达成没有"由调用方在计划跑完之后单独判。"""
     idx, last = 0, None
     skip = set()        # 够不着的目标坐标。find 重跑时要绕开它们,否则原地打转
+    # 开局一次问完整份计划。批量拦得住"缺物品/缺工具"这类和位置无关的
+    batch = _precheck_all(sp, goal, plan, results)
     while idx < len(plan) and idx < MAX_STEPS:
         op = plan[idx]
-        facts = _facts(sp, goal, plan, idx, last, results)
 
         blocked = None
         if op.get("op") not in _READ_ONLY:
-            pre = fastjudge.ask("action_sanity", facts)
-            print(f"[fastjudge] {idx} {op.get('op')} will_work={pre['will_work']} blocker={pre['blocker']}")
-            # 【以 blocker 为准,不看 will_work】。will_work 是 Score,三档连续量中间档吸概率,
-            # 实测 conf 只有 0.42~0.62;blocker 是互斥 Choice,同样现场能到 0.72~0.88
-            b = pre["blocker"]
-            if b.value not in (None, "none", "unknown") and b.sure():
-                blocked = b.value
+            # 批量已经拦下的不用再问一次
+            blocked = batch.pop(idx, None)
+            if blocked is None:
+                # 【位置类只能现场判】。批量那趟坐标还是 $t.pos 占位符,
+                # 要等 find 执行完才有真值,所以 bad_spot/too_far 留到这儿
+                facts = _facts(sp, goal, plan, idx, last, results)
+                pre = fastjudge.ask("action_sanity", facts)
+                print(f"[fastjudge] {idx} {op.get('op')} will_work={pre['will_work']} blocker={pre['blocker']}")
+                # 【以 blocker 为准,不看 will_work】。will_work 是 Score,三档连续量中间档吸概率,
+                # 实测 conf 只有 0.42~0.62;blocker 是互斥 Choice,同样现场能到 0.72~0.88
+                b = pre["blocker"]
+                if b.value not in (None, "none", "unknown") and b.sure():
+                    blocked = b.value
 
         if blocked:
             print(f"[agent] 第{idx}步预判失败 blocker={blocked}")
