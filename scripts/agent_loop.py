@@ -13,6 +13,7 @@ import fastjudge
 
 MAX_STEPS = 40
 MAX_REPLANS = 3
+CANDIDATES = 8      # find 至少拿这么多候选,够不着就换下一个
 
 
 def _facts(sp, goal, plan, idx, last_result, results):
@@ -64,6 +65,7 @@ def _run_plan(goal, sp, plan, results):
     """走完一份计划。返回 (走到第几步, 最后一个结果, 是不是中途卡死了)。
     这里【只管执行】,"目标到底达成没有"由调用方在计划跑完之后单独判。"""
     idx, last = 0, None
+    skip = set()        # 够不着的目标坐标。find 重跑时要绕开它们,否则原地打转
     while idx < len(plan) and idx < MAX_STEPS:
         op = plan[idx]
         facts = _facts(sp, goal, plan, idx, last, results)
@@ -82,11 +84,26 @@ def _run_plan(goal, sp, plan, results):
             print(f"[agent] 第{idx}步预判失败 blocker={blocked}")
             last = json.dumps({"error": "precheck_failed", "blocker": blocked}, ensure_ascii=False)
         else:
+            # 【find 要多拿几个候选】。计划里默认 n=1,只拿一个的话第一个够不着就没得换了,
+            # 而 find_tiles 端点不支持排除,换目标只能靠客户端在候选里滤
+            if op.get("op") == "find" and op.get("n", 1) < CANDIDATES:
+                op = {**op, "n": CANDIDATES}
+                plan[idx] = op
             try:
                 last = sp.exec_op(op, results)
             except Exception as e:
                 last = json.dumps({"error": str(e)}, ensure_ascii=False)
             print(f"[agent] {idx}/{len(plan)} {op.get('op')} -> {last[:200]}")
+            # 【find 的结果要过一遍黑名单】。exec_op 总把第一个写进 results,
+            # 不滤的话重跑 find 只会挑回刚拉黑的那一个,来回打转
+            if skip and op.get("op") == "find" and op.get("id"):
+                alt = _pick_unskipped(last, skip)
+                if alt:
+                    results[op["id"]] = {"pos": {"x": alt["x"], "y": alt["y"]}, "tiles": [alt]}
+                    print(f"[agent] 换目标 -> ({alt['x']},{alt['y']})")
+                else:
+                    last = json.dumps({"error": "no_reachable_target",
+                                       "tried": len(skip)}, ensure_ascii=False)
 
         if not sp.op_failed(last):
             idx += 1
@@ -105,9 +122,52 @@ def _run_plan(goal, sp, plan, results):
             if not sp.op_failed(last):
                 idx += 1
                 continue
-        return idx, last, True      # 这一步真的走不通,交给上层重规划
+
+        # 【这个目标不行就换一个,别惊动大模型】。砍树那局:树梢坐标够不着,四次重规划出四份
+        # 一样的计划。模板早就是这么做的(skip 掉够不着的,locate 下一个)
+        back = _retarget(sp, plan, idx, results, skip, blocked)
+        if back is not None:
+            idx = back
+            continue
+        return idx, last, True      # 换不动了,交给上层重规划
 
     return idx, last, False
+
+
+# 这几类说明"这个目标不行",不是"做法不行"。换个目标就完事,重规划是浪费
+_RETARGETABLE = {"bad_spot", "too_far"}
+
+
+def _retarget(sp, plan, idx, results, skip, blocked):
+    """把当前目标拉黑,回退到产生它的那个 find 步重跑。返回要跳回的步号,换不动就 None。"""
+    if blocked not in _RETARGETABLE:
+        return None
+    ref = plan[idx].get("at") or plan[idx].get("to")
+    if not ref:
+        return None
+    got = sp.resolve_arg(ref, results)
+    if not got:
+        return None
+    xy = (got["x"], got["y"]) if isinstance(got, dict) else (got[0], got[1])
+    skip.add(xy)
+
+    # 往前找最近的 find:它产生的 id 正是这一步引用的那个
+    want_id = str(ref).lstrip("$").split(".")[0]
+    for j in range(idx - 1, -1, -1):
+        if plan[j].get("op") in ("find", "find_biome") and plan[j].get("id") == want_id:
+            print(f"[agent] {xy} 够不着({blocked}),拉黑重找 -> 回到第{j}步")
+            return j
+    return None
+
+
+def _pick_unskipped(out, skip):
+    """find 的结果里挑第一个没被拉黑的。find_tiles 端点不支持排除,只能拿回来自己滤"""
+    try:
+        d = json.loads(out)
+    except Exception:
+        return None
+    tiles = [t for t in (d.get("tiles") or []) if (t["x"], t["y"]) not in skip]
+    return tiles[0] if tiles else None
 
 
 _HOW_MANY = {"1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6_to_10": 6}

@@ -1850,12 +1850,6 @@ def run_goal(goal):
     drain_stale_instructions()
     _tally.clear()      # 台账跟着目标走,上个目标的指标不能漏到下一个
 
-    # 激进模式:循环里的判断全走快判层,大模型只在开局和走不通时醒。/start 那条路一点不动
-    if goal.strip().startswith("ai "):
-        import agent_loop
-        if agent_loop.run(goal.strip()[3:].strip(), _sys.modules[__name__]):
-            return
-
     # 2 = 只测地狱那一段:直接把人放到地狱再跑,跳过砍树/盖房/下降。
     # 传送目标由 mod 算(HellLanding),这边照旧只是触发
     if goal.strip() == "2":
@@ -1866,11 +1860,22 @@ def run_goal(goal):
         _run_hell(teleport=True)
         return
 
+    # 【模板优先】。砍树/挖矿/开箱这类 find 形状,模板早就跑通了(失败换下一个目标而不是惊动大模型);
+    # 激进层排在它后面,专攻模板覆盖不了的:合成、建造、多步
+    ai_mode = goal.strip().startswith("ai ")
+    if ai_mode:
+        goal = goal.strip()[3:].strip()
+
     spec = classify_find(goal)
     if spec:
         print(f"[find-template] {spec}")
         run_find_template(spec)
         return
+
+    if ai_mode:
+        import agent_loop
+        if agent_loop.run(goal, _sys.modules[__name__]):
+            return
 
     # 剩下的交给工具循环:一步一看,上一步的返回值决定下一步。
     # 【为什么不是一次性规划】查配方才知道缺多少、问了玩家才知道备多少:这类目标的后一步依赖
