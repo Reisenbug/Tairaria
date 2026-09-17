@@ -1,0 +1,4 @@
+{"t": 1789620422.768438, "name": "find_shape", "dt": 0.747, "state": "{'goal': '砍两棵树', 'note': '材料在背包里的放置/建造不算 find 形状'}", "ans": {"shape": ["find", 0.77]}}
+{"t": 1789620423.0283499, "name": "find_shape", "dt": 0.259, "state": "{'goal': '用背包里的绳子搭个绳梯', 'note': '材料在背包里的放置/建造不算 find 形状'}", "ans": {"shape": ["not_find_class", 1.0]}}
+{"t": 1789620423.3063092, "name": "find_shape", "dt": 0.277, "state": "{'goal': '去地狱', 'note': '材料在背包里的放置/建造不算 find 形状'}", "ans": {"shape": ["descend", 0.96]}}
+{"t": 1789620423.58944, "name": "op_failure", "dt": 0.282, "state": "{'operation': 'place_at', 'result': '{\"outcome\":\"no_swing\",\"reason\":\"out_of_reach\"}'}", "ans": {"kind": ["replan", 0.91]}}

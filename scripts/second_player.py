@@ -25,6 +25,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from websockets.sync.client import connect as ws_connect
 
+import fastjudge
+
 load_dotenv()
 
 # print 只到终端,谁也回读不了。同一份也写进文件,和 mod 的 TerraBlindLogs 一样能事后翻。
@@ -61,6 +63,9 @@ MOD = "http://127.0.0.1:17878"
 POLL_S = 1.0
 NAV_TIMEOUT_S = 240
 NAV_REPORT_S = 12       # progress-note cadence while walking
+# nav 的 24px 容差是给寻路用的,不是给"到没到"用的。目标在实心块里时它会停在几格外照报 done,
+# 调用方信了就去挥镐挥空。2 格 = 挥镐够得着的范围,超了就不算到。
+NAV_ARRIVE_CELLS = 2
 MAX_TURNS = 60          # tool-loop turns per task (runaway guard)
 HISTORY_MAX_MSGS = 80   # rolling conversation memory across tasks
 
@@ -320,7 +325,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "find_tiles",
-        "description": "在玩家周围找最近的某类方块,按距离排序返回格坐标。name 用原版 TileID 精确名(不确定就先 tile_names 查)。找 Containers(箱子)时每个结果带 kind 字段(箱子种类名,如 Chest=普通木箱/Gold Chest/Ivy Chest 常春藤箱/Ice Chest…)。**要特定种类的箱子时,把 n 设大(比如20),从返回列表里筛出 kind 匹配的那个再挑最近**——因为按距离排序时想要的种类可能排在很多其他箱子后面,n 太小会漏掉。找到后 nav_to 到旁边再 interact 开箱。",
+        "description": "整张地图可读,所以'这世界有没有钨矿/最近的铁在哪'不是探索问题,是查询问题。给一个 TileID 精确名(不确定先 tile_names 查),返回按距离排序的格坐标。**找矿把 max_dist 开大(2000 以上)**:一次就能知道这世界到底有没有这种矿。扫不到就是真没有(钨和银、铜和锡是二选一生成的,没扫到钨就去扫银),不用查 wiki 猜它在哪一层,也不用自己去找洞口。拿到坐标直接 nav_to,寻路会自己挖竖井下去。找 Containers(箱子)时每个结果带 kind 字段(如 Chest=普通木箱/Gold Chest/Ivy Chest 常春藤箱/Ice Chest 等)。**要特定种类的箱子时,把 n 设大(比如20),从返回列表里筛出 kind 匹配的那个再挑最近**:因为按距离排序时想要的种类可能排在很多其他箱子后面,n 太小会漏掉。找到后 nav_to 到旁边再 interact 开箱。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -338,13 +343,29 @@ TOOLS = [
             "type": "object",
             "properties": {"x": {"type": "integer"}, "y": {"type": "integer"},
                            "greed": {"type": "array", "items": {"type": "string"},
-                                     "description": "沿途收集的 TileID 名,如 Containers/Heart"}},
+                                     "description": "沿途收集的 TileID 名,如 Containers/Heart"},
+                           "exact": {"type": "boolean",
+                                     "description": "目标是矿石/实心块这种人站不上去的格子时传 true。寻路会切到挖矿模式:直接挖竖井过去,落点就在目标那一片里,不会贴到附近地面就说到了。挖矿几乎总该传 true"},
+                           "reach": {"type": "boolean",
+                                     "description": "开箱子这种够得着就行的,传 true。不用挤到那一格上"}},
             "required": ["x", "y"],
         },
     }},
     {"type": "function", "function": {
+        "name": "mine_vein",
+        "description": "【要攒够多少个矿就用这个,一次搞定】。给矿种和数量,它自己跑完整个循环:找最近的矿脉 → 挖竖井过去(落在矿脉中间) → 站着把射程内同种矿一次挖光 → 不够就去下一个矿脉,直到数量够或附近没了。**不要自己 find_tiles + nav_to + use_item 一颗颗挖**,那要十几轮还容易数错。返回两个数,别搞混:**tiles_removed=清掉了几格(不代表到手)**,**got=真正进背包的东西(这个才算数)**。两者对不上时会给 warn,通常是寻路挖竖井时把矿顺手清了、掉落物没吸到。停止原因:enough=够了/exhausted=附近没了/tool_weak=镐不够硬/interrupted=玩家打断。挖铁/铅/银/钨/铜/锡/金/铂金这些都走这个。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "矿的 TileID 名,如 Iron/Lead/Silver/Tungsten(不确定先 tile_names 查)"},
+                "count": {"type": "integer", "description": "要挖到几个"},
+            },
+            "required": ["name", "count"],
+        },
+    }},
+    {"type": "function", "function": {
         "name": "mine",
-        "description": "从玩家位置向某方向朝目标格挖掘。立即返回;用 get_state 看进度。先 nav_to 到矿旁再挖。",
+        "description": "【挖穿过去】。从人当前位置朝一个方向一路挖到目标格,自己开竖井/横井,人在哪、该挖哪几格全由它算。**目标够不着、埋在实心块里、要往下挖到深处的矿,一律用这个,别用 use_item**(那个只挥一格,够不着就报 out_of_reach)。也【不用】先 nav_to:寻路站不上去的地方正是该用它的地方。dir 选朝哪个方向挖(down 往下开竖井最常用),target_x/y 给要挖到的那一格。等挖完才返回。返回 outcome:done=挖通了/stalled=挥了半天一格没掉(镐不够硬,换更好的镐)/unbreakable=那格上面压着东西原版不许破坏(换镐没用,先清上面)/out_of_reach=中途够不着了/no_tiles=这个方向没东西可挖/no_pickaxe=背包前十格没镐;mined=实际挖掉几格,got=挖到了什么。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -356,7 +377,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "use_item",
-        "description": "对着一个格坐标使用背包里某个槽位的道具——**一步完成**:自动切槽位+瞄准+使用,并等到动作结束才返回。镐挖、斧砍树、剑砍、放方块、扔炸弹、用魔杖、喝药都走这个。slot 直接抄 get_state 里那个物品的 slot 字段。x,y 给大概位置即可:砍树/挖矿会自动吸附到最近的树干根部/可挖格,不用你算准。返回 outcome:removed=目标已消失(树倒了/矿挖掉了,成功);no_progress=一下都没啃动,看 reason:reason=tool_weak 是镐/斧不够硬(换更好的);reason=blocked 是上方压着树或箱子(原版不许抽走支撑,先清掉上方那格,换镐没用)。挖和放都【挖到/放到为止】,不用你估时间。放方块:placed=方块已出现(成功);not_placed=挥了但没放上,看 reason:occupied=那格已被占/out_of_reach=够不到/wrong_item=手上不是那个/out_of_stock=没货了/rejected=游戏拒绝了这次放置(那格空的、够得到、东西也对,但没放上——多半是这个放置本身没意义,比如对着半空放绳子)/rejected_no_anchor_hint=同上,且四周没有可附着的方块(仅供参考,不是硬规则)/no_swing=一次都没挥出去(通常够不到)。n/a=只有喝药/扔炸弹/召唤这种既不采集也不放置的才是 n/a。采集类务必先 find_tiles 拿真实坐标,别自己编。道具有射程,先 nav 到旁边。",
+        "description": "对着一个格坐标使用背包里某个槽位的道具,**一步完成**:自动切槽位+瞄准+使用,并等到动作结束才返回。镐挖、斧砍树、剑砍、扔炸弹、用魔杖、喝药都走这个。**放东西不走这个,用 place_at**(它会自己挪脚和补锚点,这里不会)。slot 直接抄 get_state 里那个物品的 slot 字段。x,y 给大概位置即可:砍树/挖矿会自动吸附到最近的树干根部/可挖格,不用你算准。返回 outcome:removed=目标已消失(树倒了/矿挖掉了,成功);no_progress=一下都没啃动,看 reason:reason=tool_weak 是镐/斧不够硬(换更好的);reason=blocked 是上方压着树或箱子(原版不许抽走支撑,先清掉上方那格,换镐没用);**reason=out_of_reach 说明这一格得挖过去而不是站着挥,改用 mine**。挖【挖到为止】,不用你估时间。n/a=喝药/扔炸弹/召唤这种既不采集也不放置的。采集类务必先 find_tiles 拿真实坐标,别自己编。这个工具只挥够得着的一格(砍树、挖脚边的矿);要挖深处或挖穿地形用 mine。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -366,6 +387,22 @@ TOOLS = [
                 "duration_ticks": {"type": "integer", "description": "【挖和放都不用填】它们挖到/放到为止。只有喝药/扔炸弹/召唤这种没有可观测结果的才需要,默认30"},
             },
             "required": ["x", "y", "slot"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "place_at",
+        "description": "把背包里的东西放到指定格:家具(工作台/熔炉/铁砧/桌椅)、方块、平台、绳子都走这个。**放东西一律用它,别用 use_item**。它自己解决放置的三个条件:够不着就挪脚走过去(行差大了还会先垒柱子/铺平台造落脚点)、身子挡着就让开、挡路的墙挖开、那格四邻没有可附着的锚就从你脚下那块地接一串方块过去。所以地不平、旁边有树、脚下悬空都不用你操心,给个大概位置就行。item 用物品名(中英文都行)。要连放一排就给 n 和 step_x/step_y(比如往右铺5格:n=5,step_x=1)。返回 outcome:done=全放上了/partial=放上一部分就卡住了/stuck=一格都没放上(reason 说卡在哪);cells 逐格说明结果。**一格失败就停,不会闷头刷完**,看 reason 换地方再来。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "item": {"type": "string", "description": "物品名,如 '工作台' 或 'Wood'"},
+                "x": {"type": "integer", "description": "目标格x"},
+                "y": {"type": "integer", "description": "目标格y"},
+                "n": {"type": "integer", "description": "连放几个,默认1"},
+                "step_x": {"type": "integer", "description": "连放时每格往右挪几列(往左给负数),默认0"},
+                "step_y": {"type": "integer", "description": "连放时每格往下挪几行(往上给负数),默认0"},
+            },
+            "required": ["item", "x", "y"],
         },
     }},
     {"type": "function", "function": {
@@ -406,6 +443,17 @@ TOOLS = [
                 "amount": {"type": "integer", "description": "数量,默认1"},
             },
             "required": ["name"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "track",
+        "description": "【要攒够某个数量的东西时,先用这个立台账】。比如查出做铁头盔要15铁锭=45铁矿、还要5铁锭做铁砧,就 track {\"铁矿\":60}。之后**每个动作的返回里都会自动带【进度】字段**(如 铁矿 23/60,够了会标'够了'),数字是从背包实时读的真值。所以挖矿这种要重复十几轮的活,照着进度判断够没够就行,**绝不要自己在脑子里累加**:你看不到被省略的旧结果,一定会数错。攒完一样接着攒下一样时,重新 track 覆盖即可。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "items": {"type": "object", "description": "物品名->目标数量,如 {\"铁矿\":60,\"石块\":20}"},
+            },
+            "required": ["items"],
         },
     }},
     {"type": "function", "function": {
@@ -497,15 +545,119 @@ def _inv_map(state):
             m[n] = m.get(n, 0) + it.get("stack", 0)
     return m
 
+def _strip_thinking(text):
+    """把模型写在正文里的推理剥掉,只留给玩家看的那部分。
+
+    deepseek 这类模型不分 thinking/content,会把"嗯、其实不用问、我直接开口问"整段自言自语
+    写进 content,而 run_task 是无条件转发 content 的,于是思考过程全进了游戏聊天。
+    有 </think> 就取它之后的;没有就原样返回。"""
+    if not text:
+        return ""
+    for tag in ("</think>", "</thinking>"):
+        if tag in text:
+            text = text.rsplit(tag, 1)[1]
+    return re.sub(r"<think(?:ing)?>.*?</think(?:ing)?>", "", text, flags=re.S).strip()
+
+
 def _slim(state):
-    """The minimum a decision needs after an action: where am I, am I hurt."""
+    """The minimum a decision needs after an action: where am I, am I hurt.
+
+    【pos 必须是脚下那一格】。/state 的 player.pos 是碰撞箱左上角(p.position),直接 /16 会比
+    真实站位高 2~3 格、左 0~1 格,而 act 报的 origin_cell 用的是 mod 的 OriginCx/Cy(覆盖最多
+    的列 + 脚底那行)。两套坐标同时喂给模型,它拿这个的坐标去算那个的射程,于是"挖脚下一格"
+    都报 out_of_reach。这里照抄 OriginCx/OriginCy 的算法,全局只留一套站位判据。"""
     p = state.get("player", {})
     pos = p.get("pos", {})
-    return {"pos": {"x": round(pos.get("x", 0) / 16), "y": round(pos.get("y", 0) / 16)},
+    px, py = pos.get("x", 0), pos.get("y", 0)
+    w, h = p.get("width", 20), p.get("height", 42)
+    c0, c1 = int(px // 16), int((px + w - 1) // 16)
+    best, best_cov = c0, -1.0
+    for c in range(c0, c1 + 1):
+        cov = min(px + w, (c + 1) * 16) - max(px, c * 16)
+        if cov > best_cov:
+            best, best_cov = c, cov
+    return {"pos": {"x": best, "y": int((py + h - 2) // 16)},
             "hp": p.get("hp"), "on_ground": p.get("on_ground")}
 
 def _inv_snapshot():
     return _inv_map(mod_get("/state"))
+
+def _mine_vein(what, count):
+    """把 run_find_template 里那套挖矿循环做成 L2 能调的一个动作。
+
+    【为什么不是让模型自己 find+nav+use_item】那要十几轮,而且每轮都得自己判断够没够。
+    这里代码自己数,一轮返回。流程和模板那份完全一致,别在这儿另写一套:
+      找最近矿脉 -> nav exact(挖竖井过去,落在矿脉里) -> /mine_reach 问射程矩形
+      -> 射程内同种矿逐个 use_item strict 挖光 -> 不够就下一个矿脉
+    """
+    prev_inv = _inv_snapshot()
+    # 【removed 不等于到手】。use_item 的 removed 只保证"那格空了",不保证"东西进了包":
+    # nav exact 一路挖竖井会把沿途的矿顺手清掉,等这边再去挖,格子早空了,于是 60 次全判成功
+    # 而背包一个铁矿没有(现场:mined=60,背包 0,地上掉落物 0,got 里全是石块土块)。
+    # 这里不猜物品名(tile 名 Iron 和物品名"铁矿"对不上,硬映射早晚漏),而是两个数都如实报:
+    # removed=清掉几格,got=真进包的东西。模型看 got 就知道到底拿到没有,不会被 removed 骗。
+    removed, skip, why = 0, set(), "exhausted"
+    for _ in range(count + 8):          # 每轮清一个矿脉,留足余量给够不着/挖不动的
+        if removed >= count:
+            why = "enough"; break
+        if next_instruction(block=False):
+            why = "interrupted"; break
+        r = mod_post("/find_tiles", {"name": what, "n": 30, "max_dist": 2000})
+        tiles = [t for t in (r.get("tiles") or []) if (t["x"], t["y"]) not in skip]
+        if not tiles:
+            break
+        tx, ty = tiles[0]["x"], tiles[0]["y"]
+        print(f"[vein] locate → ({tx},{ty})  {removed}/{count}")
+        nav = json.loads(run_tool("nav_to", {"x": tx, "y": ty, "exact": True, "greed": []}))
+        if nav.get("status") == "interrupted":
+            why = "interrupted"; break
+        if nav.get("status") in ("walled_in", "loop_unresolved", "timeout", "failed"):
+            skip.add((tx, ty)); continue
+        # 人落在矿脉里了,周围一片都够得着:站着一次挖光,别一颗一颗走过去
+        reach = mod_get("/mine_reach")
+        if reach.get("error"):
+            skip.add((tx, ty)); continue
+        mslot = _best_tool_slot("pick")
+        rr = mod_post("/find_tiles", {"name": what, "n": 40, "max_dist": 60})
+        hit = 0
+        for t in (rr.get("tiles") or []):
+            if removed >= count:
+                break
+            ox, oy = t["x"], t["y"]
+            if not (reach["lx"] <= ox <= reach["hx"] and reach["ly"] <= oy <= reach["hy"]):
+                continue
+            res = json.loads(run_tool("use_item", {"x": ox, "y": oy, "strict": True,
+                                                   "slot": mslot if mslot is not None else -1,
+                                                   "duration_ticks": 0}))
+            out, reason = res.get("outcome"), res.get("reason") or ""
+            if out == "removed":
+                removed += 1; hit += 1
+            elif reason == "out_of_reach":
+                # 挖脚下会把人挪走(掉进自己挖的洞),这一批的站位就废了。拉黑这格,回外层重新定位
+                skip.add((ox, oy)); break
+            elif reason == "tool_weak":
+                return with_result({"outcome": "tool_weak", "tiles_removed": removed,
+                                    "note": f"镐挖不动{what},换更好的镐再来"}, prev_inv)
+            else:
+                skip.add((ox, oy))
+        print(f"[vein] +{hit} → {removed}/{count}")
+        if hit == 0:
+            skip.add((tx, ty))
+    out = {"outcome": why, "tiles_removed": removed, "wanted": count}
+    res = json.loads(with_result(out, prev_inv))
+    # got 是唯一可信的"到手了多少"。格子清了却什么都没进包,必须当场说破,
+    # 不然模型拿着 tiles_removed=60 往下走,到合成那步才发现手里是空的
+    if not res.get("got"):
+        res["warn"] = (f"清掉了{removed}格,但背包一件东西都没多。多半是寻路挖竖井时把矿顺手清了,"
+                       f"掉落物没吸到。去 find_tiles 看看 {what} 还剩多少,或者走回去捡。")
+    return json.dumps(res, ensure_ascii=False)
+
+
+# 【攒东西的台账】。凑 60 个铁矿要十几轮 mine,而每次 with_result 只报这一次的 got,
+# 累计数只活在对话历史里,compact_for_send 又会把旧结果 stub 掉。于是模型挖三四轮就
+# 觉得差不多了。这里让代码从背包读真值报进度,不靠模型自己数。
+_tally = {}      # 物品名 -> 要凑到多少
+
 
 def with_result(base, prev_inv):
     """Attach post-action slim state + inventory delta (got/lost) to a tool result, so the model has what it needs
@@ -520,6 +672,10 @@ def with_result(base, prev_inv):
         base["got"] = got
     if lost:
         base["lost"] = lost
+    if _tally:
+        # 每个动作都带着台账走,模型不必回头翻历史,也不会把"这一次挖到3个"当成"总共3个"
+        base["进度"] = {k: f"{now.get(k, 0)}/{v}" + ("  够了" if now.get(k, 0) >= v else "")
+                        for k, v in _tally.items()}
     return json.dumps(base, ensure_ascii=False)
 
 
@@ -680,6 +836,17 @@ def run_tool(name, args):
                 if d.get("done") or d.get("status") == "failed":
                     d = dict(d)
                     d["state"] = _slim(mod_get("/state"))   # where did we end up — no separate get_state needed
+                    # 【done 不等于到了】。nav 的容差是给寻路用的(24px),目标在实心岩里、人站
+                    # 不上去时它认为"我尽力了"就报 done。调用方信了就去挥镐,于是 out_of_reach
+                    # 死循环。"到没到"的判据该按用途定,所以这儿量一次真实距离,差太远就改口。
+                    at = d["state"]["pos"]
+                    dist = max(abs(at["x"] - args["x"]), abs(at["y"] - args["y"]))
+                    if d.get("done") and dist > NAV_ARRIVE_CELLS:
+                        d["status"] = "stopped_short"
+                        d["done"] = False
+                        d["dist"] = dist
+                        d["note"] = (f"寻路停在 {dist} 格外(目标多半在实心块里站不上去)。"
+                                     f"要挖它就用 mine 直接开过去,别在这儿挥镐。")
                     return json.dumps(d, ensure_ascii=False)
                 # 赶路时扫附近的白名单目标,捡完接着走(nav 从人站的地方重启,场是缓存的,恢复不花钱)。
                 # 每轮都扫:原来 3 秒一次,人 3 秒跑几十格,捡完一颗转身就走,3 格外的第二颗就甩身后了。
@@ -733,8 +900,25 @@ def run_tool(name, args):
             mod_post("/nav_recede_stop", {})
             return json.dumps({"done": False, "status": "timeout"})
     if name == "mine":
-        return json.dumps(mod_post("/mine", {
-            "dir": args["dir"], "target_wx": args["target_x"], "target_wy": args["target_y"]}))
+        prev_inv = _inv_snapshot()
+        r = mod_post("/mine", {
+            "dir": args["dir"], "target_wx": args["target_x"], "target_wy": args["target_y"]})
+        if not r.get("ok"):
+            return json.dumps(r, ensure_ascii=False)
+        # 【等挖完再返回】。原来发完就走,描述里写"用 get_state 看进度",而 SYSTEM 又禁止单独调
+        # get_state,两条互相打架,于是模型从来不选这个工具,改用 use_item 一格格怼。
+        deadline = time.monotonic() + 180.0
+        st = {"outcome": "running"}
+        while time.monotonic() < deadline:
+            time.sleep(0.2)
+            st = mod_get("/mine_status")
+            if not st.get("running"):
+                break
+            if next_instruction(block=False):
+                mod_post("/mine_stop", {})
+                return json.dumps({"outcome": "interrupted"}, ensure_ascii=False)
+        return with_result({"outcome": st.get("outcome"), "reason": st.get("reason"),
+                            "mined": st.get("mined")}, prev_inv)
     if name == "use_item":
         prev_inv = _inv_snapshot()
         dur = args.get("duration_ticks", 30)
@@ -755,6 +939,37 @@ def run_tool(name, args):
         return with_result({"outcome": st.get("outcome"), "reason": st.get("reason"),
                              "snapped_to": {"x": st.get("snapped_wx"), "y": st.get("snapped_wy")},
                              "target": st.get("target")}, prev_inv)
+    if name == "place_at":
+        prev_inv = _inv_snapshot()
+        n = max(1, int(args.get("n", 1)))
+        # 【走 /place_anywhere 不是 /place_at】。后者只是对着那格挥一下,放不上就放不上:
+        # 上次放工作台 rejected_no_anchor_hint / occupied(树) 烧掉五轮就是它。
+        # 前者会自己挪脚、让位、挖开挡路的、没锚就从脚下接一串过去。
+        # 它一次只放一格,要连放就在这儿循环,每格都享受同一套自救。
+        sx, sy = int(args.get("step_x", 0)), int(args.get("step_y", 0))
+        placed, cells = 0, []
+        for k in range(n):
+            wx, wy = args["x"] + k * sx, args["y"] + k * sy
+            r = mod_post("/place_anywhere", {"item": str(args["item"]), "world": [wx, wy]})
+            if not r.get("accepted"):
+                cells.append({"at": [wx, wy], "result": r.get("reason", "rejected")})
+                break
+            deadline = time.monotonic() + 120.0
+            st = {"outcome": "running"}
+            while time.monotonic() < deadline:
+                time.sleep(0.2)
+                st = mod_get("/place_anywhere_status")
+                if not st.get("running"):
+                    break
+            out = st.get("outcome")
+            cells.append({"at": [wx, wy], "result": out,
+                          **({"reason": st.get("reason")} if st.get("reason") else {})})
+            if out == "done":
+                placed += 1
+            else:
+                break        # 一格放不上,后面多半同理,别闷头刷完
+        return with_result({"outcome": "done" if placed == n else ("partial" if placed else "stuck"),
+                            "placed": placed, "wanted": n, "cells": cells}, prev_inv)
     if name == "interact":
         prev_inv = _inv_snapshot()
         r = mod_post("/interact", {"tile_x": args["x"], "tile_y": args["y"]})
@@ -804,6 +1019,28 @@ def run_tool(name, args):
         return with_result(r, prev_inv)
     if name == "recipe":
         return json.dumps(mod_post("/recipe", {"name": args["name"]}), ensure_ascii=False)
+    if name == "mine_vein":
+        return _mine_vein(args["name"], int(args.get("count", 1)))
+    if name == "track":
+        items = args.get("items") or {}
+        _tally.clear()
+        for k, v in items.items():
+            try:
+                _tally[str(k)] = int(v)
+            except (TypeError, ValueError):
+                pass
+        inv = _inv_map(mod_get("/state"))
+        # 【名字对不上要当场喊】。台账的 key 是模型手打的,写成"铁矿石"/"Iron Ore" 就永远 0/60,
+        # 而它会一直挖下去等那个永远不涨的数。背包里没有的名字先用 recipe 的 ingredients.name 核对
+        # (两边都取游戏本地化名),对不上就说清楚,别静默。
+        unseen = [k for k in _tally if k not in inv]
+        out = {"tracking": {k: f"{inv.get(k, 0)}/{v}" for k, v in _tally.items()},
+               "note": "之后每个动作的返回里都会带【进度】,按它判断够没够,别自己数"}
+        if unseen:
+            out["warn"] = (f"这些名字现在背包里没有:{unseen}。如果只是还没开始采集那没问题;"
+                           f"但要是名字写错了(比如写成内部名或英文名),进度会永远卡在 0。"
+                           f"名字以 recipe 返回的 ingredients.name 为准。")
+        return json.dumps(out, ensure_ascii=False)
     if name == "ask":
         say(args["question"])
         answer = next_instruction(block=True)   # BLOCK the task until the player replies with /tb
@@ -827,7 +1064,11 @@ SYSTEM = """你是 TB,Terraria 里的 AI 二号玩家,和人类搭档。接到�
 行为:
 - 说中文,简短,像队友。开始/完成/失败各交代一句(写正文里)。
 - 拿不准就 ask 问玩家(目标模糊、要拍板),拿到答案继续。同名或陌生物品先 item_info 查清楚。
-- 砍树、挖矿:先 find_tiles 拿真实坐标(tile 名不确定先 tile_names 查,别猜),再 use_item;看 outcome 判成败,no_progress 按 reason 换法,timeout 加时长。
+- 【攒矿一律 mine_vein】。要多少个就给多少个,它自己找矿脉、挖过去、挖光、不够再找下一个,一次调用搞定。别自己 find_tiles+nav_to+use_item 一颗颗挖。
+- 砍树、砸罐子、挖某一个指定的格子:find_tiles 拿坐标(tile 名不确定先 tile_names 查,别猜)再 use_item。看 outcome 判成败,no_progress 按 reason 换法。
+- nav_to 去矿石/实心块那种站不上去的格子时传 exact:true,去开箱子传 reach:true。
+- 【要攒够数量就先 track】。查清总共要多少(含中间产物和工具的份),track 一次立好台账,
+  之后每个动作返回里的【进度】就是真账。别自己累加,也别挖几轮凭感觉说够了。
 - 寻路或动作失败,如实告诉玩家原因,提替代方案。
 - 玩家能随时打断:工具返回 status=interrupted 时,先回应,再按新意思决定继续/改向/干别的。
 
@@ -835,13 +1076,11 @@ SYSTEM = """你是 TB,Terraria 里的 AI 二号玩家,和人类搭档。接到�
 掉落、数值、召唤条件这类 recipe 查不到的,用 wiki_search + wiki_page 查官方 wiki。
 只有"大方向怎么打"这类策略可以自己想。
 
-下地狱前的物资底线(玩家算的账,按这个备):
-- 木材 125(工作台1、桌子3、椅子4、墙96、平台等都从木材来),赶路还要额外平台,所以木头多多益善
-- 绳子 20
-- 火把 4
-绳子和火把都【合不出来】(火把要凝胶,这个世界关了刷怪没得打),只能开箱子和砸罐子。
-罐子 tile 名 Pots,在洞穴里,用镐或武器打那一格就碎(use_item 判 removed),掉落自动进包。
-开够了就走,开不出来也别耗着。
+目标里没说数量、也没说走哪条路时【不许自己定量】:备多少、带什么、走哪边,这些是玩家的账,
+不是你的。先 ask 问清楚再动手,问完一次就够,别一步一问。
+
+玩家点名要的东西这世界没有(矿种是二选一生成的,钨/银、铜/锡、铁/铅各只出一种)时,
+找到同级替代品【也要先 ask】再做。换目标是玩家的决定,不是你的,哪怕属性完全一样。
 """
 
 
@@ -860,7 +1099,13 @@ PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 +
 - {"op":"use","at":"$t.pos","tool":"axe|pick|hammer"}  用工具作用于某格(砍/挖);挖到为止,不用给时间
 - {"op":"use","at":[x,y],"slot":N}                  放方块到某格;放到为止,不用给时间。slot 抄现状 items 的 slot 字段,别猜
 - {"op":"use","slot":N,"dur":30}                      对自己用的道具(传送杖/喝药/召唤),不带 at;这类才需要 dur
+- {"op":"recipe","id":"r","name":"<物品名>"}          查配方:要什么材料、还差多少、要哪个工作台。
+  【你的配方记忆不可靠,凡是要合成的东西,先查再排后面的步骤】。差多少由它算,别自己心算。
 - {"op":"craft","name":"<物品名,中英文都行>","amount":N}  合成(要站在对应工作台旁)
+- {"op":"ask","question":"..."}                       问玩家一句,阻塞等回答。
+  【只在信息不足、需要玩家拍板时用,且必须是计划的最后一步】:计划是在答案存在之前排的,
+  答案之后的步骤等于闭眼排。所以要问就出一条只有 ask(可带前面的查证步)的短计划,拿到
+  回答后你会被重新叫起来,那时再排真正的执行计划。宁可问一句,别替玩家猜。
 - {"op":"interact","at":"$c.pos"}                     开箱/开门/机关
 - {"op":"loot"}                                       捡光当前箱子
 - {"op":"fight","max_dist":25,"seconds":10}           清怪
@@ -878,6 +1123,8 @@ PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 +
 
 占位符:find 的结果用 $id.pos 在后续步引用(规划时坐标未知,执行到那步才填)。别自己编坐标。
 前置条件自己判断:看现状背包,已有斧就别再规划找斧;缺什么就把补齐步骤也排进 plan。
+合成类目标的标准形状:recipe 查清缺什么 → find 缺的矿 → nav → use 挖够 → nav 到工作台 → craft。
+现状里会告诉你身边有哪些工作台;要用的那个不在身边,就把「找到它/做一个」也排进去。
 tool:"axe"/"pick"/"hammer" 让执行器自动挑背包里最好的那把,你不用管 slot。
 tile 名不确定就用常见的(树=Trees,铁矿=Iron,箱子=Containers)。plan 尽量短、直达目标。
 
@@ -931,7 +1178,13 @@ _ACT_TOOL = {"chop": "axe", "mine": "pick", "smash": "pick"}
 
 
 def classify_find(goal):
-    """One tiny AI call: fill the find-class variable table, or {find_class:false} if the goal isn't this shape."""
+    """先问快判层是不是 find 形状。不是就直接返回,省掉一整次 LLM 往返(RPM=10 要等 6.5s)。
+    是的话才叫 LLM 填变量表 -- 表里 what/count/filter 是要生成的值,那不是判断题。"""
+    r = fastjudge.ask("find_shape", {"goal": goal, "note": "材料在背包里的放置/建造不算 find 形状"})
+    shape = r["shape"]
+    print(f"[fastjudge] shape={shape}")
+    if shape.value == "not_find_class" and shape.sure():
+        return None
     try:
         resp = client.chat.completions.create(
             model=MODEL,
@@ -1368,9 +1621,29 @@ def slim_world_for_planner():
                 tip_budget -= 1
         items.append(line)
     w = st.get("world", {})
+    # 合成要站在工作台旁,而规划器看不见世界。不报的话它只能假设台子就在脚边,craft 到了才失败
     return (f"位置格({round(pos.get('x',0)/16)},{round(pos.get('y',0)/16)}) hp{p.get('hp')} biome={p.get('biome')} "
             f"{'夜' if not w.get('day') else '昼'}{' 血月' if w.get('blood_moon') else ''}\n"
-            f"背包:{', '.join(items)}")
+            f"背包:{', '.join(items)}\n"
+            f"身边工作台:{_nearby_stations()}")
+
+
+_STATION_TILES = {"WorkBenches": "工作台", "Furnaces": "熔炉", "Anvils": "铁砧",
+                  "Tables": "桌子", "Chairs": "椅子", "Hellforge": "地狱熔炉"}
+
+
+def _nearby_stations():
+    """够得着的工作台,给规划器判断 craft 前要不要先走过去/先做一个。"""
+    found = []
+    for name, zh in _STATION_TILES.items():
+        try:
+            r = mod_post("/find_tiles", {"name": name, "n": 1, "max_dist": 40})
+            t = (r.get("tiles") or [None])[0]
+            if t:
+                found.append(f"{zh}({t['x']},{t['y']})")
+        except Exception:
+            pass
+    return ", ".join(found) or "无"
 
 
 _BIOME_ALIASES = {
@@ -1473,6 +1746,18 @@ def exec_op(op, results):
     if o == "act":
         return run_tool("act", {"steps": op["steps"],
                                 "timeout_frames": op.get("timeout_frames", 1800)})
+    if o == "recipe":
+        out = run_tool("recipe", {"name": op["name"]})
+        if op.get("id"):
+            results[op["id"]] = json.loads(out)
+        return out
+    if o == "ask":
+        # 阻塞等玩家回话。答案存进 results 供后续步引用,但真正的用法是【问完这一轮就结束】:
+        # 计划是在答案存在之前生成的,答案之后的步骤等于闭着眼睛排的。见 PLANNER_SYSTEM 里的 ask 约定。
+        out = run_tool("ask", {"question": op["question"]})
+        if op.get("id"):
+            results[op["id"]] = json.loads(out)
+        return out
     if o == "craft":
         return run_tool("craft", {"name": op["name"], "amount": op.get("amount", 1)})
     if o == "interact":
@@ -1508,6 +1793,14 @@ def exec_op(op, results):
 
 # an op result is a FAILURE (→ wake the brain) if it carries these signals. removed/placed/done/cleared/crafted = success.
 _FAIL_SIGNALS = ("error", "no_progress", "not_placed", "no_swing", "walled_in", "loop_unresolved", "timeout", "unresolved_coord")
+
+def failure_kind(op, result_str):
+    """失败之后该重试还是该重规划。分不清就会把可重试的当死局叫醒 LLM(等 6.5s),
+    或者把死局反复重试到超时"""
+    r = fastjudge.ask("op_failure", {"operation": op, "result": result_str[:600]})
+    kind = r["kind"]
+    print(f"[fastjudge] failure={kind}")
+    return kind.value if kind.sure() else None
 
 
 def op_failed(result_str):
@@ -1547,6 +1840,7 @@ def run_goal(goal):
     variable table and code runs the fixed skeleton — no hallucinated ops. FALLBACK: 甲方案 free planning for
     everything else. Understanding intent is the BRAIN's job; code only guarantees execution after routing."""
     drain_stale_instructions()
+    _tally.clear()      # 台账跟着目标走,上个目标的指标不能漏到下一个
 
     # 2 = 只测地狱那一段:直接把人放到地狱再跑,跳过砍树/盖房/下降。
     # 传送目标由 mod 算(HellLanding),这边照旧只是触发
@@ -1564,37 +1858,12 @@ def run_goal(goal):
         run_find_template(spec)
         return
 
-    fail_ctx = None
-    for attempt in range(3):   # initial plan + up to 2 replans, then give up (save RPM, ask player)
-        say_txt, plan = plan_goal(goal, fail_ctx)
-        if not plan:
-            say("我一时没想好怎么做,你能说得具体点吗?", bot=True)
-            return
-        if say_txt:
-            say(say_txt)
-        print(f"[plan] {len(plan)} ops: {[o.get('op') for o in plan]}")
-
-        results, done = {}, []
-        for i, op in enumerate(plan):
-            # interruptible between ops
-            interrupt = next_instruction(block=False)
-            if interrupt:
-                say("好,先停,你说。", bot=True)
-                _pending_instructions.append(interrupt)
-                return
-            print(f"[op {i+1}/{len(plan)}] {op}")
-            try:
-                out = exec_op(op, results)
-            except Exception as e:
-                out = json.dumps({"error": str(e)})
-            print(f"[op<] {out[:200]}")
-            if op_failed(out):
-                fail_ctx = {"step": i + 1, "op": op.get("op"), "result": out[:200], "done": done}
-                break
-            done.append(op.get("op"))
-        else:
-            return   # whole plan ran without failure — done
-    say("试了几次没成,这个我先卡住了,你看看?", bot=True)
+    # 剩下的交给工具循环:一步一看,上一步的返回值决定下一步。
+    # 【为什么不是一次性规划】查配方才知道缺多少、问了玩家才知道备多少:这类目标的后一步依赖
+    # 前一步的返回值,而一次性计划是在那些值存在之前就排完的,只能靠失败重排去试错。
+    # plan_goal / PLANNER_SYSTEM 暂时留着:RPM 扛不住的话还要退回去分流。
+    history = [{"role": "user", "content": f"目标:{goal}\n\n现状:\n{slim_world_for_planner()}"}]
+    run_task(history)
 
 
 _pending_instructions = []   # instructions caught mid-plan, re-fed to the main loop
@@ -1661,8 +1930,10 @@ def run_task(history):
         # relay any prose to chat, unless the model already said/asked it via a tool this turn
         spoke_via_tool = msg.tool_calls and any(
             tc.function.name in ("say", "ask") for tc in msg.tool_calls)
-        if msg.content and msg.content.strip() and not spoke_via_tool:
-            say(msg.content.strip())
+        if msg.content and not spoke_via_tool:
+            spoken = _strip_thinking(msg.content)
+            if spoken:
+                say(spoken)
 
         if not msg.tool_calls:
             return False  # task finished (model stopped calling tools)
@@ -1674,6 +1945,17 @@ def run_task(history):
                 out = run_tool(tc.function.name, args)
             except Exception as e:
                 out = json.dumps({"error": str(e)})
+            # 失败了先问 Jev 是哪一种。可重试的当场重来,不必为它唤醒 LLM(等 6.5s)。
+            # 【一个 tool_call_id 只能回一条】,所以重试的结果要并进同一条里
+            if op_failed(out) and failure_kind(tc.function.name, out) == "retry_same":
+                try:
+                    out2 = run_tool(tc.function.name, args)
+                except Exception as e:
+                    out2 = json.dumps({"error": str(e)})
+                print(f"[tool<retry] {tc.function.name} -> {out2[:300]}")
+                out = json.dumps({"first_attempt_failed": json.loads(out) if out.startswith("{") else out,
+                                  "retried": json.loads(out2) if out2.startswith("{") else out2},
+                                 ensure_ascii=False)
             print(f"[tool<] {tc.function.name} -> {out[:300]}")
             history.append({"role": "tool", "tool_call_id": tc.id, "content": out})
 

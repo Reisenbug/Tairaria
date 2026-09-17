@@ -33,8 +33,23 @@ except ImportError:                     # 还没轮到 waitlist,或没装
     class Noul(_Q): kind = "noul"
 
 
-API_KEY = os.environ.get("TYPESAFE_API_KEY", "")
+def _read_key():
+    """环境变量优先,否则读 ~/.typesafe_key(游戏进程继承不到终端的 export)"""
+    k = os.environ.get("TYPESAFE_API_KEY", "").strip()
+    if k:
+        return k
+    try:
+        with open(os.path.expanduser("~/.typesafe_key")) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+API_KEY = _read_key()
 ENABLED = bool(_SDK and API_KEY)
+# SDK 自己读环境变量,而 key 可能是从文件来的
+if ENABLED and not os.environ.get("TYPESAFE_API_KEY"):
+    os.environ["TYPESAFE_API_KEY"] = API_KEY
 _client = TypeSafeClient() if ENABLED else None
 
 # 判据阈值。抄官方 confidence-gated routing 的档位,按代价分级:
@@ -128,6 +143,35 @@ QUESTIONS = {
                 "clear": "先挖掉挡路的东西",
                 "retarget": "换一个目标",
                 "escalate": "自己处理不了,交给大模型",
+            },
+        ),
+    },
+
+    # 路由:是不是"找东西"那个形状。以前这一问要烧一整次大模型调用(6.5s 限流)
+    "find_shape": {
+        "shape": Choice(
+            instructions="玩家给 Terraria 里的 AI 队友下了一个目标。这个目标是不是"
+                         "「世界上有个东西,找到它->走过去->对它做点什么->重复到够」这个形状?"
+                         "是的话属于哪一种?",
+            criteria={
+                "find": "近处已经存在的方块,比如树/矿/箱子。走过去对它做点什么",
+                "find_biome": "去某个生物群系(丛林/雪原/地牢),目标是到达那片区域",
+                "find_descent": "去某群系通往地狱的主入口站定。玩家说主道/主入口/大洞口",
+                "descend": "沿主道一路下到地狱。玩家说去地狱/去底层/速降",
+                "build_replay": "回放录制好的建造。玩家说照录像盖房子/重现录制的结构",
+                "not_find_class": "不是这个形状。用背包里的材料放置建造,或者合成装备、多步任务",
+            },
+        ),
+    },
+
+    # 失败分诊。白名单只认得出"有问题",认不出"哪种问题"
+    "op_failure": {
+        "kind": Choice(
+            instructions="Terraria 里一个自动玩家执行了一步操作,拿回这个结果。接下来该怎么办?",
+            criteria={
+                "retry_same": "同样的做法再试一次就行。临时被挡住、没抢到控制权、等一下就好",
+                "replan": "这条路走不通,得换做法。目标不可达、材料不够、判据本身就错了",
+                "not_a_failure": "其实不算失败。那个词是「稍后再试」或者中间状态",
             },
         ),
     },
