@@ -213,9 +213,11 @@ def run(goal, sp):
         # 【计划排得够不够,代码自己数】。同一句"砍两棵树"LLM 出过 6 步也出过 3 步,
         # 忠实跑完 3 步就宣布成功,等于把规划的漏洞当结果
         rounds = _rounds_in(plan[:idx])
-        short = want is not None and rounds < want
+        # 【一件改变世界的事都没做 = 没做完】。这条比数量校验更根本:目标没说数量时
+        # want 是 None,数量校验整个跳过,于是"只查了个配方"也算完成(现场:铅头盔那局)
+        short = rounds == 0 or (want is not None and rounds < want)
         if short:
-            print(f"[agent] 目标要{want}轮,计划只排了{rounds}轮")
+            print(f"[agent] 目标要{want or '至少1'}轮,计划只排了{rounds}轮")
 
         if not stalled and not short:
             dt = time.monotonic() - t0
