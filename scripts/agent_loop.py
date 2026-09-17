@@ -15,16 +15,44 @@ MAX_STEPS = 40
 MAX_REPLANS = 3
 
 
-def _facts(sp, goal, plan, idx, last_result):
-    """喂给快判层的现场。字段名模型看得见,所以起有意义的名字。"""
-    return {
-        "goal": goal,
-        "plan": [p.get("op") for p in plan],
-        "current_step": idx,
-        "current_op": plan[idx] if idx < len(plan) else None,
-        "last_result": (last_result or "")[:400],
-        "world": sp.slim_world_for_planner(),
-    }
+def _facts(sp, goal, plan, idx, last_result, results):
+    """喂给快判层的现场。【只给判断要用的证据】,不给整份世界快照 --
+    塞太多噪音会让三档之间分不出来,概率摊平成 confidence=0,门控就永远不触发。"""
+    op = plan[idx] if idx < len(plan) else {}
+    kind = op.get("op", "?")
+    f = {"goal": goal, "step_kind": kind, "hp": None, "player_cell": None}
+
+    try:
+        st = sp.mod_get("/state")
+        p = st.get("player", {})
+        pos = p.get("pos", {})
+        f["hp"] = p.get("hp")
+        px, py = round(pos.get("x", 0) / 16), round(pos.get("y", 0) / 16)
+        f["player_cell"] = [px, py]
+        # 要用的东西在不在背包里,是 no_item 这一档唯一的依据
+        inv = [it.get("name") for it in (st.get("equipment", {}).get("items", []) or [])]
+        f["inventory"] = inv[:20]
+    except Exception:
+        px = py = None
+
+    # 目标坐标解析得出来才谈得上远近。解析不出来本身就是证据
+    target = op.get("at") or op.get("to")
+    if target is not None:
+        got = sp.resolve_arg(target, results)
+        if got:
+            tx, ty = (got["x"], got["y"]) if isinstance(got, dict) else (got[0], got[1])
+            f["target_cell"] = [tx, ty]
+            if px is not None:
+                f["target_distance_cells"] = abs(tx - px) + abs(ty - py)
+        else:
+            f["target_unresolved"] = str(target)
+
+    for k in ("name", "what", "tool", "slot"):
+        if op.get(k) is not None:
+            f[k] = op[k]
+    if last_result:
+        f["previous_step_result"] = last_result[:200]
+    return f
 
 
 def run(goal, sp):
@@ -47,6 +75,8 @@ def run(goal, sp):
         # 做之前先判:这步现在做得成吗。拦一次省一趟 mod 往返 + 一轮重试。
         # 【Score 给的是 0..N-1 的位置】不是 criteria 文本,三档里 <0.5 才算落在"肯定失败"那档
         pre = fastjudge.ask("action_sanity", facts)
+        # 【过了也要打】。只在失败时出声的话,全通过就一行日志都没有,看着像没接上
+        print(f"[fastjudge] {idx} {op.get('op')} will_work={pre['will_work']} blocker={pre['blocker'].value}")
         if pre["will_work"].value is not None and pre["will_work"].value < 0.5 and pre["will_work"].sure():
             blocker = pre["blocker"].value
             print(f"[agent] 第{idx}步预判失败 blocker={blocker}")
