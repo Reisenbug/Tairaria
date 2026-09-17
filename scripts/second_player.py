@@ -396,13 +396,13 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "item": {"type": "string", "description": "物品名,如 '工作台' 或 'Wood'"},
-                "x": {"type": "integer", "description": "目标格x"},
-                "y": {"type": "integer", "description": "目标格y"},
+                "x": {"type": "integer", "description": "目标格x。【不确定就别给】,代码会自己挑一个放得下又够得着的位置"},
+                "y": {"type": "integer", "description": "目标格y。同上,绝对不要自己编坐标"},
                 "n": {"type": "integer", "description": "连放几个,默认1"},
                 "step_x": {"type": "integer", "description": "连放时每格往右挪几列(往左给负数),默认0"},
                 "step_y": {"type": "integer", "description": "连放时每格往下挪几行(往上给负数),默认0"},
             },
-            "required": ["item", "x", "y"],
+            "required": ["item"],
         },
     }},
     {"type": "function", "function": {
