@@ -458,7 +458,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "recipe",
-        "description": "查一个物品的配方:要什么材料(每样带 need 要多少 / have 你现在有多少)、要站在哪种工作台旁(stations,空=徒手可做)。没材料的物品也能查——这是查配方,不是查能不能做。要凑齐一批东西时先用它算清楚缺什么,别去猜也别翻wiki。",
+        "description": "查一个物品的配方:要什么材料(每样带 need 要多少 / have 你现在有多少)、要站在哪种工作台旁(stations,空=徒手可做)。stations 每项是 {tile:台子的方块名, items:[能放出这台子的物品,各带 have]},任选 items 里的一个做出来放下去就行,优先挑 have>0 或者最好做的。没材料的物品也能查--这是查配方,不是查能不能做。要凑齐一批东西时先用它算清楚缺什么,别去猜也别翻wiki。",
         "parameters": {
             "type": "object",
             "properties": {
