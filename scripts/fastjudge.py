@@ -191,8 +191,13 @@ QUESTIONS = {
         ),
     },
 
-    # 失败分诊。白名单只认得出"有问题",认不出"哪种问题"
+    # 成没成 + 哪种失败。同组并行求值,一次往返拿两个答案
     "op_failure": {
+        # 【别再写判据表】。死表漏一个词就整局跑偏(stopped_short 漏了→八候选轮转;
+        # exhausted 漏了→挖 3 格判成功),而且换个游戏整张表作废
+        "succeeded": Noul(
+            instructions="这一步操作达成它本来要做的事了吗。只看这一步的结果,别管整个目标还剩多少活",
+        ),
         "kind": Choice(
             instructions="Terraria 里一个自动玩家执行了一步操作,拿回这个结果。接下来该怎么办?",
             criteria={

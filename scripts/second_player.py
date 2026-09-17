@@ -1765,8 +1765,8 @@ def exec_op(op, results):
     if o == "mine_vein":
         out = _mine_vein(op["what"], int(op.get("count", 1)))
         d = json.loads(out)
-        # 【清了几格不等于到手几个】。exhausted/tool_weak 都不在 op_failed 认的那几个词里,
-        # 不当场判失败的话,挖不够也会一路走到 craft 才发现背包是空的
+        # 【清了几格不等于到手几个】。挖不够要当场把失败写进结果,
+        # 否则一路走到 craft 才发现背包是空的
         if d.get("outcome") in ("exhausted", "tool_weak"):
             d["error"] = d["outcome"]
             return json.dumps(d, ensure_ascii=False)
@@ -1835,33 +1835,37 @@ def exec_op(op, results):
     return json.dumps({"error": f"unknown_op {o}"})
 
 
-# an op result is a FAILURE (→ wake the brain) if it carries these signals. removed/placed/done/cleared/crafted = success.
-_FAIL_SIGNALS = ("error", "no_progress", "not_placed", "no_swing", "walled_in", "loop_unresolved", "timeout", "unresolved_coord")
+def judge_op(op, result_str):
+    """这一步成没成、没成的话该重试还是重规划。一次问完,同组问题并行求值不加延迟。
+
+    【为什么不写判据表】。死表漏一个词就整局跑偏,而且换个游戏全部作废:
+    stopped_short 漏了导致八候选轮转,exhausted 漏了导致挖 3 格判成功。"""
+    r = fastjudge.ask("op_failure", {"operation": op, "result": result_str[:600]})
+    ok, kind = r["succeeded"], r["kind"]
+    if ok.value is None:
+        return _failed_by_table(result_str), None
+    failed = ok.value < fastjudge.NOUL_YES
+    print(f"[fastjudge] {op} 成了={ok.value:.2f}" + (f" 失败类型={kind}" if failed else ""))
+    return failed, (kind.value if failed and kind.sure() else None)
+
 
 def failure_kind(op, result_str):
-    """失败之后该重试还是该重规划。分不清就会把可重试的当死局叫醒 LLM(等 6.5s),
-    或者把死局反复重试到超时"""
-    r = fastjudge.ask("op_failure", {"operation": op, "result": result_str[:600]})
-    kind = r["kind"]
-    print(f"[fastjudge] failure={kind}")
-    return kind.value if kind.sure() else None
+    return judge_op(op, result_str)[1]
 
 
-def op_failed(result_str):
+def _failed_by_table(result_str):
+    """【只在 Jev 不可用时兜底】。这是每个 op 都要过的闸门,后端挂了不能全盘失灵。
+    平时别走这条路 -- 它就是那张会漏词的表。"""
     try:
         d = json.loads(result_str)
     except Exception:
         return False
-    # not_placed/no_swing = placement produced no tile (the eye that used to be blind); reason says why.
-    # invariant_broken/bad_request come from /act — a step's premise snapped, or the chain was malformed.
     if d.get("outcome") in ("no_progress", "timeout", "not_placed", "no_swing",
-                            "invariant_broken", "bad_request"):
+                            "invariant_broken", "bad_request", "exhausted", "tool_weak"):
         return True
-    if d.get("status") in ("failed", "walled_in", "loop_unresolved", "timeout"):
+    if d.get("status") in ("failed", "walled_in", "loop_unresolved", "timeout", "stopped_short"):
         return True
-    if "error" in d:
-        return True
-    return False
+    return "error" in d
 
 
 def drain_stale_instructions():
@@ -2000,9 +2004,10 @@ def run_task(history):
                 out = run_tool(tc.function.name, args)
             except Exception as e:
                 out = json.dumps({"error": str(e)})
-            # 失败了先问 Jev 是哪一种。可重试的当场重来,不必为它唤醒 LLM(等 6.5s)。
+            # 成没成、哪种失败,一次问完。可重试的当场重来,不必为它唤醒 LLM(等 6.5s)
             # 【一个 tool_call_id 只能回一条】,所以重试的结果要并进同一条里
-            if op_failed(out) and failure_kind(tc.function.name, out) == "retry_same":
+            _failed, _kind = judge_op(tc.function.name, out)
+            if _failed and _kind == "retry_same":
                 try:
                     out2 = run_tool(tc.function.name, args)
                 except Exception as e:

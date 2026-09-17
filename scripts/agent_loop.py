@@ -175,17 +175,12 @@ def _run_plan(goal, sp, plan, results):
                 else:
                     last = json.dumps({"error": "no_reachable_target",
                                        "tried": len(skip)}, ensure_ascii=False)
-            # 【没走到就是没走到】。nav 停在十几格外时 done=false,但 op_failed 不认 stopped_short,
-            # 于是下一步照挥,必然够不着 -- 之后被当成"这个目标不行"拉黑,八个候选轮一遍全废
-            if op.get("op") == "nav":
-                last = _nav_shortfall(last) or last
-
-        if not sp.op_failed(last):
+        # 成没成、没成算哪一类,一次问完。不再用死词表 -- 它漏 stopped_short 漏了一整局
+        failed, kind = sp.judge_op(op.get("op", "?"), last)
+        if not failed:
             idx += 1
             continue
 
-        # 失败了才分诊。retry_same 当场重来,不为它唤醒大模型
-        kind = sp.failure_kind(op.get("op", "?"), last)
         if kind == "not_a_failure":
             idx += 1
             continue
@@ -194,7 +189,7 @@ def _run_plan(goal, sp, plan, results):
                 last = sp.exec_op(op, results)
             except Exception as e:
                 last = json.dumps({"error": str(e)}, ensure_ascii=False)
-            if not sp.op_failed(last):
+            if not sp.judge_op(op.get("op", "?"), last)[0]:
                 idx += 1
                 continue
 
@@ -233,20 +228,6 @@ def _retarget(sp, plan, idx, results, skip, blocked):
             print(f"[agent] {xy} 够不着({blocked}),拉黑重找 -> 回到第{j}步")
             return j
     return None
-
-
-def _nav_shortfall(out):
-    """nav 说自己没走到就交一份失败现场。不叫 bad_spot -- 那是"这个目标不行",
-    会把矿脉拉黑;这里目标没毛病,是人没到位,换几个候选还是同样够不着。"""
-    try:
-        d = json.loads(out)
-    except Exception:
-        return None
-    if d.get("status") != "stopped_short":
-        return None
-    return json.dumps({"error": "not_arrived", "dist": d.get("dist"),
-                       "note": d.get("note"), "state": d.get("state")},
-                      ensure_ascii=False)
 
 
 def _pick_unskipped(out, skip):
