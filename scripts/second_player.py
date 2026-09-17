@@ -647,9 +647,12 @@ def _mine_vein(what, count):
     res = json.loads(with_result(out, prev_inv))
     # got 是唯一可信的"到手了多少"。格子清了却什么都没进包,必须当场说破,
     # 不然模型拿着 tiles_removed=60 往下走,到合成那步才发现手里是空的
-    if not res.get("got"):
-        res["warn"] = (f"清掉了{removed}格,但背包一件东西都没多。多半是寻路挖竖井时把矿顺手清了,"
-                       f"掉落物没吸到。去 find_tiles 看看 {what} 还剩多少,或者走回去捡。")
+    # 【要问"目标矿进包没有",不是"有没有任何东西进包"】。挖竖井一路必然带回土块石块,
+    # got 永远非空,于是这个洞永远不报 -- 45 格铅矿全丢也一路走到 craft 才被拦
+    got = res.get("got") or {}
+    if not any(what.lower() in k.lower() or k in what for k in got):
+        res["warn"] = (f"清掉了{removed}格 {what},但背包里没多出对应的矿(got={got})。"
+                       f"要么掉落物没吸到,要么被什么规则清掉了。去 find_tiles 看看还剩多少,别往下走。")
     return json.dumps(res, ensure_ascii=False)
 
 
