@@ -1842,6 +1842,12 @@ def run_goal(goal):
     drain_stale_instructions()
     _tally.clear()      # 台账跟着目标走,上个目标的指标不能漏到下一个
 
+    # 激进模式:循环里的判断全走快判层,大模型只在开局和走不通时醒。/start 那条路一点不动
+    if goal.strip().startswith("ai "):
+        import agent_loop
+        if agent_loop.run(goal.strip()[3:].strip(), _sys.modules[__name__]):
+            return
+
     # 2 = 只测地狱那一段:直接把人放到地狱再跑,跳过砍树/盖房/下降。
     # 传送目标由 mod 算(HellLanding),这边照旧只是触发
     if goal.strip() == "2":

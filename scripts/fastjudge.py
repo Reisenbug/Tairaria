@@ -164,6 +164,17 @@ QUESTIONS = {
         ),
     },
 
+    # 计划执行中的取舍。以前每问一次就要唤醒一次大模型,所以循环里干脆不问
+    "plan_step": {
+        "on_track": Score(
+            instructions="按这个计划走下去,还能达成目标吗",
+            criteria=["已经跑偏了,该重新规划", "有点问题但能继续", "完全在正轨上"],
+        ),
+        "skip_step": Noul(
+            instructions="这一步已经没必要做了(它要的结果现在已经满足)",
+        ),
+    },
+
     # 失败分诊。白名单只认得出"有问题",认不出"哪种问题"
     "op_failure": {
         "kind": Choice(
