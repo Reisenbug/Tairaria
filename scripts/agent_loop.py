@@ -109,15 +109,17 @@ def _precheck_all(sp, goal, plan, results):
         criteria=_BLOCKERS) for i in todo}
 
     ans = fastjudge.ask_many(state, qs, tag="precheck_batch")
+    # 【放行的也记下来】。只记拦下的话,放行的步查不到就又现场问一次,白花 260ms
     out = {}
     for i in todo:
         a = ans.get(f"step_{i}")
         if a and a.value not in (None, "none", "unknown") and a.sure():
             out[i] = a.value
-    if out:
-        print(f"[fastjudge] 批量预检 {len(todo)}步一次问完,拦下 {out}")
-    else:
-        print(f"[fastjudge] 批量预检 {len(todo)}步一次问完,都能做")
+        elif a and a.value == "none" and a.sure():
+            out[i] = "none"
+    stop = {i: v for i, v in out.items() if v != "none"}
+    print(f"[fastjudge] 批量预检 {len(todo)}步一次问完"
+          + (f",拦下 {stop}" if stop else ",都能做"))
     return out
 
 
@@ -133,9 +135,11 @@ def _run_plan(goal, sp, plan, results):
 
         blocked = None
         if op.get("op") not in _READ_ONLY:
-            # 批量已经拦下的不用再问一次
+            # 批量问过的不用再问一次。"none" = 批量放行,不是拦截理由
             blocked = batch.pop(idx, None)
-            if blocked is None:
+            if blocked == "none":
+                blocked = None
+            elif blocked is None:
                 # 【位置类只能现场判】。批量那趟坐标还是 $t.pos 占位符,
                 # 要等 find 执行完才有真值,所以 bad_spot/too_far 留到这儿
                 facts = _facts(sp, goal, plan, idx, last, results)
