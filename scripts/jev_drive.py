@@ -100,9 +100,20 @@ def _view(state, goal_cx, goal_cy):
                 line[-1] = "T"
         lines.append("".join(line))
 
-    if not (abs(goal_cx - px) <= half_w and abs(goal_cy - py) <= half_h):
-        ey = max(0, min(VIEW_H - 1, half_h + max(-half_h, min(half_h, goal_cy - py))))
-        ex = VIEW_W - 1 if goal_cx > px else 0
+    # 【视野外的目标要投到对的那条边】。只往左右两侧贴的话,正下方的目标会显示在左下角,
+    # Jev 照着图往左走,而它其实该往下挖
+    dx, dy = goal_cx - px, goal_cy - py
+    if abs(dx) > half_w or abs(dy) > half_h:
+        sx = dx / half_w if half_w else 0
+        sy = dy / half_h if half_h else 0
+        if abs(sx) >= abs(sy):
+            ex = VIEW_W - 1 if dx > 0 else 0
+            ey = half_h + int(round(dy / abs(sx))) if sx else half_h
+        else:
+            ey = VIEW_H - 1 if dy > 0 else 0
+            ex = half_w + int(round(dx / abs(sy))) if sy else half_w
+        ex = max(0, min(VIEW_W - 1, ex))
+        ey = max(0, min(VIEW_H - 1, ey))
         row = list(lines[ey])
         row[ex] = "T"
         lines[ey] = "".join(row)
