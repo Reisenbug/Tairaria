@@ -55,34 +55,22 @@ def _facts(sp, goal, plan, idx, last_result, results):
     return f
 
 
-def run(goal, sp):
-    """sp = second_player 模块。所有原语和 LLM 调用都借它的,这里不重复实现。"""
-    sp.say(f"(激进模式)目标:{goal}", bot=True)
-    said, plan = sp.plan_goal(goal)
-    if not plan:
-        sp.say("没规划出来,退回工具循环。", bot=True)
-        return False
-    if said:
-        sp.say(said)
-
-    results, idx, replans, last = {}, 0, 0, None
-    t0 = time.monotonic()
-
+def _run_plan(goal, sp, plan, results):
+    """走完一份计划。返回 (走到第几步, 最后一个结果, 是不是中途卡死了)。
+    这里【只管执行】,"目标到底达成没有"由调用方在计划跑完之后单独判。"""
+    idx, last = 0, None
     while idx < len(plan) and idx < MAX_STEPS:
         op = plan[idx]
         facts = _facts(sp, goal, plan, idx, last, results)
 
-        # 做之前先判:这步现在做得成吗。拦一次省一趟 mod 往返 + 一轮重试。
-        # 【Score 给的是 0..N-1 的位置】不是 criteria 文本,三档里 <0.5 才算落在"肯定失败"那档
         pre = fastjudge.ask("action_sanity", facts)
-        # 【过了也要打】。只在失败时出声的话,全通过就一行日志都没有,看着像没接上
         print(f"[fastjudge] {idx} {op.get('op')} will_work={pre['will_work']} blocker={pre['blocker']}")
         # 【以 blocker 为准,不看 will_work】。will_work 是 Score,三档连续量中间档吸概率,
         # 实测 conf 只有 0.42~0.62;blocker 是互斥 Choice,同样现场能到 0.72~0.88
         blocker = pre["blocker"]
         if blocker.value not in (None, "none", "unknown") and blocker.sure():
             print(f"[agent] 第{idx}步预判失败 blocker={blocker.value}")
-            last = json.dumps({"error": "precheck_failed", "blocker": blocker}, ensure_ascii=False)
+            last = json.dumps({"error": "precheck_failed", "blocker": blocker.value}, ensure_ascii=False)
         else:
             try:
                 last = sp.exec_op(op, results)
@@ -107,22 +95,81 @@ def run(goal, sp):
             if not sp.op_failed(last):
                 idx += 1
                 continue
+        return idx, last, True      # 这一步真的走不通,交给上层重规划
 
-        replans += 1
-        if replans > MAX_REPLANS:
-            sp.say(f"第{idx}步反复失败,我停下了。", bot=True)
-            return False
-        sp.say(f"第{idx}步走不通,重新想。", bot=True)
+    return idx, last, False
+
+
+_HOW_MANY = {"1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6_to_10": 6}
+
+
+def wanted_rounds(goal):
+    """目标要求做几轮。【读意图归快判,数次数归代码】-- 问"达成没有"是让它凭空推断世界状态,
+    实测置信只有 0.13;问"目标说要几次"证据全在文本里,实测 0.84~0.99。
+    返回 None = 没有明确次数,不做硬校验。"""
+    r = fastjudge.ask("goal_quantity", {"goal": goal})
+    counted, how = r["counted"], r["how_many"]
+    print(f"[fastjudge] 数量 counted={counted.value} how_many={how.value}({how.confidence:.2f})")
+    if counted.value is None or counted.value < fastjudge.NOUL_YES or not how.sure():
+        return None
+    return _HOW_MANY.get(how.value)
+
+
+def _rounds_in(plan):
+    """计划里排了几轮。一轮 = 一个真正作用于世界的动作(use/interact/craft/fight),
+    find/nav 只是为它做准备"""
+    return sum(1 for p in plan if p.get("op") in ("use", "interact", "craft", "fight", "loot"))
+
+
+def run(goal, sp):
+    """sp = second_player 模块。所有原语和 LLM 调用都借它的,这里不重复实现。"""
+    sp.say(f"(激进模式)目标:{goal}", bot=True)
+    said, plan = sp.plan_goal(goal)
+    if not plan:
+        sp.say("没规划出来,退回工具循环。", bot=True)
+        return False
+    if said:
+        sp.say(said)
+
+    results = {}
+    t0 = time.monotonic()
+    steps = 0
+    want = wanted_rounds(goal)   # None = 目标没说次数,不做硬校验
+
+    for attempt in range(MAX_REPLANS + 1):
+        idx, last, stalled = _run_plan(goal, sp, plan, results)
+        steps += idx
+
+        # 【计划排得够不够,代码自己数】。同一句"砍两棵树"LLM 出过 6 步也出过 3 步,
+        # 忠实跑完 3 步就宣布成功,等于把规划的漏洞当结果
+        rounds = _rounds_in(plan[:idx])
+        short = want is not None and rounds < want
+        if short:
+            print(f"[agent] 目标要{want}轮,计划只排了{rounds}轮")
+
+        if not stalled and not short:
+            dt = time.monotonic() - t0
+            print(f"[agent] 完 {steps}步 {dt:.0f}s replans={attempt} "
+                  f"{'快判在线' if fastjudge.ENABLED else '快判离线'}")
+            sp.say("做完了。", bot=True)
+            return True
+
+        if attempt >= MAX_REPLANS:
+            break
+
+        # 【告诉它差几轮】。只说"没达成"的话它下一版计划照样可能只排一轮
+        why = f"第{idx}步走不通" if stalled else f"目标要{want}轮,这份计划只排了{rounds}轮"
+        sp.say(f"{why},重新想。", bot=True)
         said, plan = sp.plan_goal(goal, fail_ctx={
-            "step": idx, "op": op.get("op"), "result": last[:300],
+            "step": idx,
+            "op": plan[idx].get("op") if stalled and idx < len(plan) else "(计划已跑完)",
+            "result": (last or "")[:300],
             "done": [p.get("op") for p in plan[:idx]]})
         if not plan:
-            return False
+            break
         if said:
             sp.say(said)
-        idx = 0
 
-    dt = time.monotonic() - t0
-    print(f"[agent] 完 {idx}步 {dt:.0f}s replans={replans} {fastjudge.ENABLED and '快判在线' or '快判离线'}")
-    sp.say("做完了。", bot=True)
-    return True
+    sp.say("试了几轮还是没成,我先停下。", bot=True)
+    print(f"[agent] 停 {steps}步 {time.monotonic() - t0:.0f}s")
+    return False
