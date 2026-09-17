@@ -58,7 +58,7 @@ def _facts(sp, goal, plan, idx, last_result, results):
 
 # 【查询类不做预检】。它们不碰世界、不吃物品、失败也无害,而"背包里有没有料"这种判据
 # 对它们根本不适用 -- recipe 查铅头盔配方被判 no_item 拦了四次,整局耗死在第0步
-_READ_ONLY = {"recipe", "find", "find_biome", "probe", "measure", "say", "ask"}
+_READ_ONLY = {"recipe", "recipe_tree", "find", "find_biome", "probe", "measure", "say", "ask"}
 
 
 _BLOCKERS = {
