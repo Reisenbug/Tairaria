@@ -1102,8 +1102,12 @@ PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 +
 - {"op":"use","at":"$t.pos","tool":"axe|pick|hammer"}  用工具作用于某格(砍/挖);挖到为止,不用给时间
 - {"op":"use","at":[x,y],"slot":N}                  放方块到某格;放到为止,不用给时间。slot 抄现状 items 的 slot 字段,别猜
 - {"op":"use","slot":N,"dur":30}                      对自己用的道具(传送杖/喝药/召唤),不带 at;这类才需要 dur
-- {"op":"recipe","id":"r","name":"<物品名>"}          查配方:要什么材料、还差多少、要哪个工作台。
+- {"op":"recipe","id":"r","name":"<物品名>"}          查配方【只查一层】:要什么材料、还差多少、要哪个工作台。
   【你的配方记忆不可靠,凡是要合成的东西,先查再排后面的步骤】。差多少由它算,别自己心算。
+- {"op":"recipe_tree","id":"r","name":"<物品名>","qty":1}  【合成类目标一律先用这个】一次递归展开到底,直接给三样东西:
+  gather=要去世界上弄到手的原料总表(已按轮数乘好、已扣背包现有),craft_order=从底往上的合成顺序,
+  stations=要哪些台子(find_in_world:true 的是祭坛这类做不出来、得去世界里找的)。
+  比如"铅头盔"会展开出「挖45铅矿、做工作台→熔炉→铁砧→铅锭→铅头盔」整条链。别自己一层层 recipe 推。
 - {"op":"craft","name":"<物品名,中英文都行>","amount":N}  合成(要站在对应工作台旁)
 - {"op":"ask","question":"..."}                       问玩家一句,阻塞等回答。
   【只在信息不足、需要玩家拍板时用,且必须是计划的最后一步】:计划是在答案存在之前排的,
@@ -1763,6 +1767,11 @@ def exec_op(op, results):
         if d.get("outcome") in ("exhausted", "tool_weak"):
             d["error"] = d["outcome"]
             return json.dumps(d, ensure_ascii=False)
+        return out
+    if o == "recipe_tree":
+        out = json.dumps(mod_post("/recipe_tree", {"name": op["name"],
+                                                   "qty": int(op.get("qty", 1))}), ensure_ascii=False)
+        results[op.get("id", "_")] = json.loads(out)
         return out
     if o == "use":
         # self-use items (teleport wand / potion / summon) act on the player, no target coord needed → x=y=-1.
