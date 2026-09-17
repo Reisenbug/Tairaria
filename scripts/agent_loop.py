@@ -55,6 +55,11 @@ def _facts(sp, goal, plan, idx, last_result, results):
     return f
 
 
+# 【查询类不做预检】。它们不碰世界、不吃物品、失败也无害,而"背包里有没有料"这种判据
+# 对它们根本不适用 -- recipe 查铅头盔配方被判 no_item 拦了四次,整局耗死在第0步
+_READ_ONLY = {"recipe", "find", "find_biome", "probe", "measure", "say", "ask"}
+
+
 def _run_plan(goal, sp, plan, results):
     """走完一份计划。返回 (走到第几步, 最后一个结果, 是不是中途卡死了)。
     这里【只管执行】,"目标到底达成没有"由调用方在计划跑完之后单独判。"""
@@ -63,14 +68,19 @@ def _run_plan(goal, sp, plan, results):
         op = plan[idx]
         facts = _facts(sp, goal, plan, idx, last, results)
 
-        pre = fastjudge.ask("action_sanity", facts)
-        print(f"[fastjudge] {idx} {op.get('op')} will_work={pre['will_work']} blocker={pre['blocker']}")
-        # 【以 blocker 为准,不看 will_work】。will_work 是 Score,三档连续量中间档吸概率,
-        # 实测 conf 只有 0.42~0.62;blocker 是互斥 Choice,同样现场能到 0.72~0.88
-        blocker = pre["blocker"]
-        if blocker.value not in (None, "none", "unknown") and blocker.sure():
-            print(f"[agent] 第{idx}步预判失败 blocker={blocker.value}")
-            last = json.dumps({"error": "precheck_failed", "blocker": blocker.value}, ensure_ascii=False)
+        blocked = None
+        if op.get("op") not in _READ_ONLY:
+            pre = fastjudge.ask("action_sanity", facts)
+            print(f"[fastjudge] {idx} {op.get('op')} will_work={pre['will_work']} blocker={pre['blocker']}")
+            # 【以 blocker 为准,不看 will_work】。will_work 是 Score,三档连续量中间档吸概率,
+            # 实测 conf 只有 0.42~0.62;blocker 是互斥 Choice,同样现场能到 0.72~0.88
+            b = pre["blocker"]
+            if b.value not in (None, "none", "unknown") and b.sure():
+                blocked = b.value
+
+        if blocked:
+            print(f"[agent] 第{idx}步预判失败 blocker={blocked}")
+            last = json.dumps({"error": "precheck_failed", "blocker": blocked}, ensure_ascii=False)
         else:
             try:
                 last = sp.exec_op(op, results)
@@ -160,10 +170,13 @@ def run(goal, sp):
         # 【告诉它差几轮】。只说"没达成"的话它下一版计划照样可能只排一轮
         why = f"第{idx}步走不通" if stalled else f"目标要{want}轮,这份计划只排了{rounds}轮"
         sp.say(f"{why},重新想。", bot=True)
+        # 【把失败原因原样带上】。不带的话 LLM 每轮拿到一样的输入,出一样的计划,
+        # 四次重规划四份相同的 plan(现场:铅头盔那局)
         said, plan = sp.plan_goal(goal, fail_ctx={
             "step": idx,
             "op": plan[idx].get("op") if stalled and idx < len(plan) else "(计划已跑完)",
             "result": (last or "")[:300],
+            "why": why,
             "done": [p.get("op") for p in plan[:idx]]})
         if not plan:
             break

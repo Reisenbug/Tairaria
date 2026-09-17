@@ -1581,7 +1581,11 @@ def plan_goal(goal, fail_ctx=None):
     user = f"目标:{goal}\n\n现状:\n{state}"
     if fail_ctx:
         user += (f"\n\n上次执行到第{fail_ctx['step']}步 {fail_ctx['op']} 失败:{fail_ctx['result']}\n"
-                 f"已完成:{fail_ctx['done']}\n给一条修复计划接着干(别从头)。")
+                 f"已完成:{fail_ctx['done']}\n")
+        # 【原因要原样给它】。只给"失败"两个字的话,它每轮拿到一样的输入就出一样的计划
+        if fail_ctx.get("why"):
+            user += f"判据:{fail_ctx['why']}\n"
+        user += "给一条修复计划接着干(别从头)。"
     try:
         resp = client.chat.completions.create(
             model=MODEL,
