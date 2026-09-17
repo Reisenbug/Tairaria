@@ -70,16 +70,18 @@ def run(goal, sp):
 
     while idx < len(plan) and idx < MAX_STEPS:
         op = plan[idx]
-        facts = _facts(sp, goal, plan, idx, last)
+        facts = _facts(sp, goal, plan, idx, last, results)
 
         # 做之前先判:这步现在做得成吗。拦一次省一趟 mod 往返 + 一轮重试。
         # 【Score 给的是 0..N-1 的位置】不是 criteria 文本,三档里 <0.5 才算落在"肯定失败"那档
         pre = fastjudge.ask("action_sanity", facts)
         # 【过了也要打】。只在失败时出声的话,全通过就一行日志都没有,看着像没接上
-        print(f"[fastjudge] {idx} {op.get('op')} will_work={pre['will_work']} blocker={pre['blocker'].value}")
-        if pre["will_work"].value is not None and pre["will_work"].value < 0.5 and pre["will_work"].sure():
-            blocker = pre["blocker"].value
-            print(f"[agent] 第{idx}步预判失败 blocker={blocker}")
+        print(f"[fastjudge] {idx} {op.get('op')} will_work={pre['will_work']} blocker={pre['blocker']}")
+        # 【以 blocker 为准,不看 will_work】。will_work 是 Score,三档连续量中间档吸概率,
+        # 实测 conf 只有 0.42~0.62;blocker 是互斥 Choice,同样现场能到 0.72~0.88
+        blocker = pre["blocker"]
+        if blocker.value not in (None, "none", "unknown") and blocker.sure():
+            print(f"[agent] 第{idx}步预判失败 blocker={blocker.value}")
             last = json.dumps({"error": "precheck_failed", "blocker": blocker}, ensure_ascii=False)
         else:
             try:
