@@ -1096,6 +1096,9 @@ PLANNER_SYSTEM = """你是 Terraria agent TB 的规划器。给你一个目标 +
 - {"op":"find","id":"t","what":"<TileID英文名,如Trees/Iron/Containers>","n":1}  在附近找最近的方块,结果存到 id
 - {"op":"find_biome","id":"j","what":"jungle"}        全图找生物群系中心(jungle/snow/desert/dungeon/corruption/crimson/hallow)。**去远处的丛林/雪地/地牢用这个,别用 find**
 - {"op":"nav","to":"$t.pos"}                          走到某坐标
+- {"op":"nav","to":"$t.pos","exact":true}             目标是矿石/实心块这种站不上去的格子时加 exact:寻路改挖竖井过去,落点就在目标那一片里。不加就只会贴到附近地面说"到了",实际停在十几格外
+- {"op":"nav","to":"$c.pos","reach":true}             开箱/交互这种够得着就行的,不用挤到那一格上
+- {"op":"mine_vein","what":"<矿的TileID名,如Lead/Iron>","count":N}  【攒矿只用这个】找矿脉→挖竖井过去→站着把射程内同种矿挖光→不够再换下一脉,一个 op 跑完整个循环。返回 tiles_removed(清了几格)和 got(真进包的),以 got 为准
 - {"op":"use","at":"$t.pos","tool":"axe|pick|hammer"}  用工具作用于某格(砍/挖);挖到为止,不用给时间
 - {"op":"use","at":[x,y],"slot":N}                  放方块到某格;放到为止,不用给时间。slot 抄现状 items 的 slot 字段,别猜
 - {"op":"use","slot":N,"dur":30}                      对自己用的道具(传送杖/喝药/召唤),不带 at;这类才需要 dur
@@ -1130,7 +1133,9 @@ find/nav/use(每轮的 find 用不同的 id);说挖十个铁就排十轮,或者�
 
 占位符:find 的结果用 $id.pos 在后续步引用(规划时坐标未知,执行到那步才填)。别自己编坐标。
 前置条件自己判断:看现状背包,已有斧就别再规划找斧;缺什么就把补齐步骤也排进 plan。
-合成类目标的标准形状:recipe 查清缺什么 → find 缺的矿 → nav → use 挖够 → nav 到工作台 → craft。
+合成类目标的标准形状:recipe 查清缺什么 → mine_vein 把矿一次攒够 → nav 到工作台 → craft。
+【攒矿一律 mine_vein】,它自己找矿脉、挖竖井过去、站着挖光、不够再换下一脉,一个 op 搞定。
+绝不要自己排 find+nav+use 一颗颗挖:矿埋在实心块里,nav 会停在十几格外,挥镐永远够不着。
 现状里会告诉你身边有哪些工作台;要用的那个不在身边,就把「找到它/做一个」也排进去。
 tool:"axe"/"pick"/"hammer" 让执行器自动挑背包里最好的那把,你不用管 slot。
 tile 名不确定就用常见的(树=Trees,铁矿=Iron,箱子=Containers)。plan 尽量短、直达目标。
@@ -1742,7 +1747,23 @@ def exec_op(op, results):
         if not pos:
             return _unresolved(op["to"])
         x, y = (pos["x"], pos["y"]) if isinstance(pos, dict) else (pos[0], pos[1])
-        return run_tool("nav_to", {"x": x, "y": y})
+        req = {"x": x, "y": y}
+        # 【矿石那一格站不上去】。不传 exact 就只会贴到附近地面说"到了",然后停在十几格外,
+        # 下一步挥镐必然够不着。exact 切挖矿模式:挖竖井下去,落点在目标那一片里
+        if op.get("exact"):
+            req["exact"] = True
+        if op.get("reach"):
+            req["reach"] = True
+        return run_tool("nav_to", req)
+    if o == "mine_vein":
+        out = _mine_vein(op["what"], int(op.get("count", 1)))
+        d = json.loads(out)
+        # 【清了几格不等于到手几个】。exhausted/tool_weak 都不在 op_failed 认的那几个词里,
+        # 不当场判失败的话,挖不够也会一路走到 craft 才发现背包是空的
+        if d.get("outcome") in ("exhausted", "tool_weak"):
+            d["error"] = d["outcome"]
+            return json.dumps(d, ensure_ascii=False)
+        return out
     if o == "use":
         # self-use items (teleport wand / potion / summon) act on the player, no target coord needed → x=y=-1.
         at = resolve_arg(op["at"], results) if op.get("at") is not None else None
