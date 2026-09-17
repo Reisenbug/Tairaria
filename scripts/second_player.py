@@ -1900,6 +1900,19 @@ def run_goal(goal):
         _run_hell(teleport=True)
         return
 
+    # drive x y = 不用寻路,让 Jev 看着地形图一步步走过去。显式命令,不经过语义分类
+    if goal.strip().startswith("drive "):
+        parts = goal.split()
+        if len(parts) != 3 or not parts[1].lstrip("-").isdigit() or not parts[2].lstrip("-").isdigit():
+            say("用法:/tb drive <格x> <格y>,比如 /tb drive 2119 296", bot=True)
+            return
+        gx, gy = int(parts[1]), int(parts[2])
+        import jev_drive
+        say(f"不用寻路,我自己看着地形走到 ({gx},{gy})。", bot=True)
+        ok, turns, why = jev_drive.drive(_sys.modules[__name__], gx, gy)
+        say(f"{'到了' if ok else '没到'},走了{turns}步({why})。", bot=True)
+        return
+
     # 【模板优先】。砍树/挖矿/开箱这类 find 形状,模板早就跑通了(失败换下一个目标而不是惊动大模型);
     # 激进层排在它后面,专攻模板覆盖不了的:合成、建造、多步
     ai_mode = goal.strip().startswith("ai ")
